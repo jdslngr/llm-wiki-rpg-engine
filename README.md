@@ -111,8 +111,9 @@ real playthrough: turn 2 read 5,210 of 5,550 input tokens from cache, turn 3 rea
 - 💸 **Prompt caching** — the fixed prompt prefix is cached (1h TTL), cutting input cost
   ~90% on cached turns.
 - 🔌 **Provider-agnostic** — one code path over the [AI SDK](https://sdk.vercel.ai),
-  defaulting to Claude via OpenRouter; swap to OpenAI, Google, or a local model by changing
-  env vars. **Bring-your-own-key** is supported per user.
+  defaulting to Claude Sonnet via OpenRouter; swap to any OpenAI-compatible provider
+  (OpenAI, Groq, Together, Ollama, LM Studio) by changing env vars.
+  **Bring-your-own-key** is supported per user.
 - 👤 **Accounts & saves** — own email/password auth (bcrypt + httpOnly session cookie),
   ownership-checked routes, multiple save files, resume-where-you-left-off.
 - 📖 **Chapter-end recap** — engine-derived facts woven into a short AI-written summary.
@@ -136,7 +137,7 @@ real playthrough: turn 2 read 5,210 of 5,550 input tokens from cache, turn 3 rea
 |---|---|
 | Frontend | React + Vite + TypeScript + Tailwind v4 |
 | Backend | Node.js + Express (serves the API *and* the built frontend) |
-| AI | Provider-agnostic via the `ai` SDK (default: Claude Sonnet via OpenRouter) |
+| AI | Provider-agnostic via the `ai` SDK: Claude Sonnet via OpenRouter by default; any OpenAI-compatible provider works |
 | Database | PostgreSQL (with an in-memory fallback) |
 | Auth | Own username/password — bcrypt + signed httpOnly session cookie |
 | Packaging | Docker + docker-compose |
