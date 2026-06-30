@@ -334,3 +334,5 @@ content files with your own (FORK_GUIDE.md walks through exactly which ones).
 
 State architecture inspired by Andrej Karpathy's "LLM wiki" idea for long-horizon memory,
 adapted here into a stateful narrative engine with code-based story gating.
+
+*Dedicated to Roslin Pal.*
