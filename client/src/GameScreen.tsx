@@ -1,0 +1,728 @@
+import { useEffect, useRef, useState } from 'react'
+import type { Dossier, DoneFrame, GameState, Turn, WikiState, WikiUpdate } from './types'
+
+const WORD_CAP = 300
+const VISIBLE_TURNS = 15
+
+// Phase 6 resilience: abort a turn that takes too long so the spinner can never
+// hang forever. Slightly longer than the server's own 75s cap.
+const CLIENT_TURN_TIMEOUT_MS = 90_000
+
+function wordCount(s: string): number {
+  const t = s.trim()
+  return t ? t.split(/\s+/).length : 0
+}
+
+type DebugEntry = { from: string; to: string; advanced: boolean; events: string[]; wiki_updates: WikiUpdate[] }
+
+interface Props {
+  initialState: GameState
+  onLogout: () => void
+  onSettings?: () => void
+  onChapterComplete?: () => void
+  onBackToSaves?: () => void
+}
+
+export default function GameScreen({ initialState, onLogout, onSettings, onChapterComplete, onBackToSaves }: Props) {
+  // The playthrough's character is fixed once loaded — to switch, return to Your
+  // Stories and start/resume a different one (no in-game restart).
+  const [character] = useState<Dossier | null>(initialState.character)
+  const [anchor, setAnchor] = useState(initialState.anchor)
+  // Server-provided, chapter-agnostic header labels.
+  const [chapterNumber, setChapterNumber] = useState(initialState.chapterNumber)
+  const [chapterTitle, setChapterTitle] = useState(initialState.chapterTitle)
+  const [anchorTitle, setAnchorTitle] = useState(initialState.anchorTitle)
+  const [history, setHistory] = useState<Turn[]>(initialState.history)
+  const [actions, setActions] = useState<string[]>(initialState.actions)
+  const [wikiState, setWikiState] = useState<WikiState>(initialState.wikiState)
+  const [setting, setSetting] = useState(initialState.setting)
+  const [debug, setDebug] = useState<DebugEntry[]>([])
+
+  const [input, setInput] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [showDebug, setShowDebug] = useState(import.meta.env.DEV)
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [pendingInput, setPendingInput] = useState<string | null>(null)
+  const [streamingText, setStreamingText] = useState('')
+  // The action that just failed, so we can offer a one-click "Try again".
+  const [failedInput, setFailedInput] = useState<string | null>(null)
+  const [undoBusy, setUndoBusy] = useState(false)
+  const [dossierOpen, setDossierOpen] = useState(false)
+  const [showAllTurns, setShowAllTurns] = useState(false)
+  const [isScrolledUp, setIsScrolledUp] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/auth/me')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => setIsAdmin(!!d?.user?.isAdmin))
+      .catch(() => {})
+  }, [])
+
+  const logRef = useRef<HTMLDivElement>(null)
+  // Scroll behaviour: jump to the TOP on a fresh load (mount, new game, resume,
+  // restart) so the player starts at the opening prose.  After the player sends a
+  // response the effect scrolls their message to the top of the viewport — the AI
+  // response then streams in below the fold.  `wantTop` is set true by adopt() and
+  // on mount; `snapPlayerToTop` is set true in takeTurn before the state updates.
+  const wantTop = useRef(true)
+  const prevLen = useRef(0)
+  // Set by takeTurn just before state updates; the effect reads and clears it so
+  // the player's just-sent message scrolls to the top of the viewport once.
+  const snapPlayerToTop = useRef(false)
+  useEffect(() => {
+    const el = logRef.current
+    if (!el) return
+    if (wantTop.current) {
+      // Fresh load: start at the opening prose.
+      el.scrollTo({ top: 0 })
+      wantTop.current = false
+    } else if (snapPlayerToTop.current && loading) {
+      // Player just sent a response — scroll so their message sits at the top of
+      // the viewport.  During streaming we intentionally do nothing: the AI
+      // response fills in below the fold and the player scrolls down to read it.
+      //
+      // Defer with requestAnimationFrame so the DOM layout is settled (the live
+      // "pending input" bubble may have just been inserted).  Also safe against
+      // React StrictMode double-invocation — we only schedule one rAF and clear
+      // the flag immediately so subsequent effect runs skip it.
+      snapPlayerToTop.current = false
+      requestAnimationFrame(() => {
+        const playerMsgs = el.querySelectorAll('[data-role="player"]')
+        const lastPlayerMsg = playerMsgs[playerMsgs.length - 1]
+        if (!(lastPlayerMsg instanceof HTMLElement)) return
+        const before = el.scrollTop
+        const scrollTarget = el.scrollTop + lastPlayerMsg.getBoundingClientRect().top - el.getBoundingClientRect().top
+        el.scrollTo({ top: scrollTarget, behavior: 'auto' })
+        if (import.meta.env.DEV) {
+          console.log(
+            '[scroll-snap] playerMsg el:', lastPlayerMsg,
+            '\n  container top:', el.getBoundingClientRect().top,
+            'player top:', lastPlayerMsg.getBoundingClientRect().top,
+            '\n  old scrollTop:', before,
+            '→ new:', el.scrollTop,
+            'target was:', scrollTarget,
+          )
+        }
+      })
+    }
+    prevLen.current = history.length
+  }, [history, loading, streamingText])
+
+  // Dev/admin rollback: restore the wiki to before the last committed turn.
+  async function undoLastTurn() {
+    setUndoBusy(true)
+    setError('')
+    try {
+      const res = await fetch('/api/rollback', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error ?? 'Could not undo.')
+      setAnchor(data.anchor)
+      setHistory(data.history)
+      setActions(data.actions ?? [])
+      setWikiState(data.wikiState ?? {})
+      if (typeof data.setting === 'string') setSetting(data.setting)
+      setDebug([])
+      prevLen.current = data.history.length // keep auto-scroll aligned after the trim
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not undo.')
+    } finally {
+      setUndoBusy(false)
+    }
+  }
+
+  function handleTranscriptScroll() {
+    const el = logRef.current
+    if (!el) return
+    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    setIsScrolledUp(distFromBottom > 300)
+  }
+
+  const words = wordCount(input)
+  const overCap = words > WORD_CAP
+
+  // Export the whole story so far as a Markdown file the player can keep. Built entirely
+  // from the in-browser history — AI turns become prose, the player's own actions become
+  // "You:" lines — and downloaded via a temporary blob URL (no server round-trip).
+  function exportStory() {
+    const name = character?.name ?? 'Your character'
+    const lines: string[] = [
+      '# Archipelago Lighthouse',
+      '',
+      `**${name}** · Chapter ${chapterNumber}: ${chapterTitle}`,
+      '',
+      `_Exported ${new Date().toLocaleString()}_`,
+      '',
+      '---',
+      '',
+    ]
+    for (const t of history) {
+      lines.push(t.role === 'player' ? `**You:** ${t.content}` : t.content)
+      lines.push('')
+    }
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'story'
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `archipelago-lighthouse-${slug}-ch${chapterNumber}.md`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  async function takeTurn(text: string) {
+    const playerInput = text.trim()
+    if (!playerInput || loading || wordCount(playerInput) > WORD_CAP) return
+    snapPlayerToTop.current = true
+    setLoading(true)
+    setError('')
+    setFailedInput(null)
+    setPendingInput(playerInput)
+    setStreamingText('')
+    setInput('')
+    const priorHistory = history
+
+    // Abort a turn that runs past the timeout so the spinner can never hang.
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), CLIENT_TURN_TIMEOUT_MS)
+
+    try {
+      const res = await fetch('/api/play-turn', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerInput }),
+        signal: controller.signal,
+      })
+      if (!res.ok) {
+        let msg = `Request failed (${res.status})`
+        try {
+          const j = await res.json()
+          if (j?.error) msg = j.error
+        } catch {
+          /* not JSON */
+        }
+        throw new Error(msg)
+      }
+      if (!res.body) throw new Error('No response stream')
+
+      // Read the NDJSON stream line-by-line.
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let narrative = ''
+      let done: DoneFrame | null = null
+
+      while (true) {
+        const { done: streamDone, value } = await reader.read()
+        if (streamDone) break
+        buffer += decoder.decode(value, { stream: true })
+        let nl: number
+        while ((nl = buffer.indexOf('\n')) >= 0) {
+          const line = buffer.slice(0, nl).trim()
+          buffer = buffer.slice(nl + 1)
+          if (!line) continue
+          const msg = JSON.parse(line)
+          if (msg.type === 'narrative') {
+            narrative = msg.text
+            setStreamingText(msg.text)
+          } else if (msg.type === 'done') {
+            done = msg
+            if (typeof msg.narrative === 'string' && msg.narrative) narrative = msg.narrative
+          } else if (msg.type === 'error') {
+            throw new Error(msg.error || 'The storyteller stumbled.')
+          }
+        }
+      }
+
+      // Commit the completed turn. The server already folded events + advanced the
+      // anchor; we just reflect what it returned.
+      setHistory([
+        ...priorHistory,
+        { role: 'player', content: playerInput },
+        { role: 'ai', content: narrative },
+      ])
+      setActions(done?.suggested_actions ?? [])
+      if (done) {
+        setAnchor(done.anchor)
+        if (typeof done.chapterNumber === 'number') setChapterNumber(done.chapterNumber)
+        if (typeof done.chapterTitle === 'string') setChapterTitle(done.chapterTitle)
+        if (typeof done.anchorTitle === 'string') setAnchorTitle(done.anchorTitle)
+        setWikiState(done.wikiState ?? {})
+        if (typeof done.setting === 'string') setSetting(done.setting)
+        setDebug((d) => [
+          ...d,
+          {
+            from: done!.fromAnchor,
+            to: done!.anchor,
+            advanced: done!.advanced,
+            events: done!.events ?? [],
+            wiki_updates: done!.wiki_updates ?? [],
+          },
+        ])
+      }
+    } catch (err) {
+      // Log the real error; show the player a warm, generic message. A timeout
+      // (AbortError) gets its own line so a slow turn reads differently from a
+      // hard failure.
+      console.error('[play-turn]', err)
+      const timedOut = err instanceof DOMException && err.name === 'AbortError'
+      setError(
+        timedOut
+          ? 'The storyteller took too long to respond. Your words are safe — try again.'
+          : 'The storyteller stumbled. Your words are safe — try again.',
+      )
+      setInput(playerInput) // restore the player's text so they can retry
+      setFailedInput(playerInput)
+    } finally {
+      clearTimeout(timeout)
+      setLoading(false)
+      setPendingInput(null)
+      setStreamingText('')
+    }
+  }
+
+  // ── Shared style helpers ──────────────────────────────────────────────────
+
+  const fontTitle: React.CSSProperties = { fontFamily: "'Cinzel', Georgia, serif", letterSpacing: '0.04em' }
+  const fontBody: React.CSSProperties = { fontFamily: "'Lora', Georgia, serif" }
+
+  return (
+    <div className="min-h-screen">
+      {/* ── Header / nav bar ─────────────────────────────────────────────── */}
+      <header
+        className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 px-4 sm:px-8 py-3 border-b"
+        style={{
+          background: 'var(--color-bg-nav)',
+          borderColor: 'var(--color-gold-dim)',
+          boxShadow: '0 2px 16px rgba(0,0,0,0.28)',
+        }}
+      >
+        <div className="min-w-0">
+          <h1 className="text-[15px] font-medium text-text-primary" style={fontTitle}>
+            Archipelago Lighthouse
+          </h1>
+          <p className="text-xs italic text-text-muted mt-1" style={fontBody}>
+            Chapter {chapterNumber} · {chapterTitle}
+            <span className="mx-1.5 text-text-dim">·</span>
+            <span className="text-text-muted">{anchorTitle}</span>
+          </p>
+        </div>
+        <div className="flex items-center gap-1 flex-wrap">
+          <button
+            onClick={exportStory}
+            title="Download this story so far as a Markdown file"
+            className="text-xs border rounded-sm px-[14px] py-1.5 text-gold-text hover:opacity-80 transition"
+            style={{ borderColor: 'var(--color-gold-nav)', fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
+          >
+            ⤓ Export
+          </button>
+          {onBackToSaves && (
+            <button
+              onClick={onBackToSaves}
+              className="text-xs border rounded-sm px-[14px] py-1.5 text-gold-text hover:opacity-80 transition"
+              style={{ borderColor: 'var(--color-gold-nav)', fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
+            >
+              ← Your Stories
+            </button>
+          )}
+          {(import.meta.env.DEV || isAdmin) && (
+            <button
+              onClick={() => setShowDebug((v) => !v)}
+              className="text-xs border rounded-sm px-[14px] py-1.5 text-gold-text hover:opacity-80 transition"
+              style={{ borderColor: 'var(--color-gold-nav)', fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
+            >
+              {showDebug ? 'Hide' : 'Show'} debug
+            </button>
+          )}
+          {onSettings && (
+            <button
+              onClick={onSettings}
+              className="text-xs border rounded-sm px-[14px] py-1.5 text-gold-text hover:opacity-80 transition"
+              style={{ borderColor: 'var(--color-gold-nav)', fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
+            >
+              Settings
+            </button>
+          )}
+          <button
+            onClick={async () => {
+              try { await fetch('/api/auth/logout', { method: 'POST' }) } catch { /* ok */ }
+              onLogout()
+            }}
+            className="text-xs border rounded-sm px-[14px] py-1.5 text-gold-text hover:opacity-80 transition"
+            style={{ borderColor: 'var(--color-gold-nav)', fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
+          >
+            Log out
+          </button>
+        </div>
+      </header>
+
+      <div className="mx-auto flex max-w-6xl gap-4 p-4">
+        {/* Story column */}
+        <main className="flex min-w-0 flex-1 flex-col">
+          <div
+            ref={logRef}
+            onScroll={handleTranscriptScroll}
+            className="flex-1 space-y-4 overflow-y-auto border p-5"
+            style={{
+              background: 'var(--color-bg-story)',
+              borderColor: 'var(--color-gold-dim)',
+              maxHeight: 'calc(100dvh - 230px)',
+            }}
+          >
+            {/* Character dossier — collapsible on mobile; tap chip to expand */}
+            {character && (
+              dossierOpen ? (
+                <div
+                  className="p-4 rounded-t-sm border"
+                  style={{
+                    background: 'var(--color-bg-dossier)',
+                    borderColor: 'var(--color-gold-mid)',
+                  }}
+                >
+                  <div className="flex items-baseline justify-between gap-2">
+                    <h2 className="text-sm italic font-medium" style={{ color: 'oklch(0.80 0.022 78)', ...fontBody }}>
+                      You are {character.name}
+                    </h2>
+                    <span className="shrink-0 text-[11px] uppercase tracking-wide text-text-muted">
+                      {character.knowsLabel}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-xs italic text-text-muted" style={fontBody}>{character.povLabel}</p>
+                  <p className="mt-1 text-xs text-text-primary" style={fontBody}>{character.role}</p>
+                  <p className="mt-2 text-sm leading-relaxed text-text-primary" style={fontBody}>{character.dossier}</p>
+                  {setting && (
+                    <>
+                      <div className="mt-3 flex items-center gap-2 text-[10px] uppercase tracking-wider text-text-dim">
+                        <span className="h-px flex-1" style={{ background: 'var(--color-gold-mid)' }} />
+                        Setting
+                        <span className="h-px flex-1" style={{ background: 'var(--color-gold-mid)' }} />
+                      </div>
+                      <p className="mt-1.5 text-xs leading-relaxed text-text-muted" style={fontBody}>{setting}</p>
+                    </>
+                  )}
+                  <button
+                    onClick={() => setDossierOpen(false)}
+                    className="mt-3 text-xs text-text-muted hover:text-text-primary transition"
+                    style={fontBody}
+                  >
+                    Collapse dossier
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setDossierOpen(true)}
+                  className="flex w-full items-center gap-2 px-[22px] py-[11px] rounded-t-sm border"
+                  style={{
+                    background: 'var(--color-bg-dossier)',
+                    borderColor: 'var(--color-gold-mid)',
+                  }}
+                >
+                  <span className="text-sm italic text-text-primary" style={{ ...fontBody, color: 'oklch(0.80 0.022 78)' }}>
+                    {character.name} &middot; {character.role}
+                  </span>
+                  <span className="ml-auto text-[13px] text-gold-text" style={fontBody}>Expand dossier +</span>
+                </button>
+              )
+            )}
+
+            {/* Older turns — collapsed when there are more than VISIBLE_TURNS */}
+            {(() => {
+              const turnCutoff = showAllTurns ? 0 : Math.max(0, history.length - VISIBLE_TURNS)
+              const hiddenCount = turnCutoff
+              const visibleHistory = history.slice(turnCutoff)
+              return (
+                <>
+                  {hiddenCount > 0 && (
+                    <div className="text-center mb-7">
+                      <button
+                        onClick={() => setShowAllTurns(true)}
+                        className="text-[13px] text-gold-text hover:opacity-80 transition"
+                        style={{ fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.03em' }}
+                      >
+                        Show {hiddenCount} older turn{hiddenCount !== 1 ? 's' : ''}
+                      </button>
+                    </div>
+                  )}
+                  {visibleHistory.map((t, i) =>
+                    t.role === 'ai' ? (
+                      <div
+                        key={turnCutoff + i}
+                        className="whitespace-pre-wrap mb-6"
+                        style={{
+                          fontSize: '16.5px',
+                          lineHeight: '1.88',
+                          color: 'var(--color-text-body)',
+                          textWrap: 'pretty',
+                          fontFamily: "'Lora', Georgia, serif",
+                        }}
+                      >
+                        {t.content}
+                      </div>
+                    ) : (
+                      <div key={turnCutoff + i} className="flex justify-end" data-role="player">
+                        <div
+                          className="max-w-[80%] px-3 py-3"
+                          style={{
+                            background: 'oklch(0.218 0.050 150)',
+                            border: '1px solid var(--color-gold-dim)',
+                            color: 'var(--color-text-body)',
+                            fontFamily: "'Lora', Georgia, serif",
+                          }}
+                        >
+                          {t.content}
+                        </div>
+                      </div>
+                    ),
+                  )}
+                </>
+              )
+            })()}
+
+            {/* Live turn while streaming */}
+            {loading && pendingInput && (
+              <div className="flex justify-end" data-role="player">
+                <div
+                  className="max-w-[80%] px-3 py-3"
+                  style={{
+                    background: 'oklch(0.218 0.050 150)',
+                    border: '1px solid var(--color-gold-dim)',
+                    color: 'var(--color-text-body)',
+                    fontFamily: "'Lora', Georgia, serif",
+                  }}
+                >
+                  {pendingInput}
+                </div>
+              </div>
+            )}
+            {loading && (
+              <div
+                className="whitespace-pre-wrap mb-6"
+                style={{
+                  fontSize: '16.5px',
+                  lineHeight: '1.88',
+                  color: 'var(--color-text-body)',
+                  textWrap: 'pretty',
+                  fontFamily: "'Lora', Georgia, serif",
+                }}
+              >
+                {streamingText ? (
+                  <>
+                    {streamingText}
+                    <span className="ml-0.5 inline-block animate-pulse">▍</span>
+                  </>
+                ) : (
+                  <span className="animate-pulse text-sm text-text-muted" style={fontBody}>The storyteller is writing…</span>
+                )}
+              </div>
+            )}
+
+            {/* Jump-to-latest — appears when scrolled up reading older turns */}
+            {isScrolledUp && (
+              <div className="sticky bottom-4 flex justify-center">
+                <button
+                  onClick={() => {
+                    logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' })
+                    setIsScrolledUp(false)
+                  }}
+                  className="rounded-sm px-4 py-2.5 text-sm font-semibold shadow-lg transition hover:opacity-90"
+                  style={{
+                    background: 'linear-gradient(180deg, var(--color-gold) 0%, var(--color-gold-dark) 100%)',
+                    color: 'oklch(0.17 0.050 150)',
+                    fontFamily: "'Lora', Georgia, serif",
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,228,110,0.25)',
+                  }}
+                >
+                  Down to latest
+                </button>
+              </div>
+            )}
+          </div>
+
+          {anchor === 'END' ? (
+            /* Chapter over: let the player read the closing scene, then move on. */
+            <div
+              className="mt-4 rounded-sm border p-5 text-center"
+              style={{
+                borderColor: 'var(--color-gold-dim)',
+                background: 'var(--color-bg-card)',
+              }}
+            >
+              <p className="text-base font-medium text-text-primary" style={fontBody}>Chapter complete</p>
+              <p className="mt-1 text-sm text-text-muted" style={fontBody}>The vow is made. See how your story unfolded.</p>
+              <button
+                onClick={() => onChapterComplete?.()}
+                className="mt-4 w-full rounded-sm px-5 py-3 text-sm font-semibold transition hover:opacity-90 sm:w-auto sm:px-6"
+                style={{
+                  background: 'linear-gradient(180deg, var(--color-gold) 0%, var(--color-gold-dark) 100%)',
+                  color: 'oklch(0.17 0.050 150)',
+                  fontFamily: "'Lora', Georgia, serif",
+                  letterSpacing: '0.06em',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,228,110,0.25)',
+                }}
+              >
+                View your recap →
+              </button>
+            </div>
+          ) : (
+          <>
+          {/* Free-form input — first, to encourage the player to write their own action. */}
+          <div
+            className="mt-[10px] rounded-sm border p-[14px_18px_12px]"
+            style={{
+              background: 'var(--color-bg-card)',
+              borderColor: 'var(--color-gold-dim)',
+            }}
+          >
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) takeTurn(input)
+              }}
+              placeholder="What do you do? Write your own action… (⌘/Ctrl + Enter to send)"
+              rows={3}
+              disabled={loading}
+              className="w-full border-none bg-transparent text-text-body placeholder:text-text-dim/70 disabled:opacity-60 resize-none"
+              style={{
+                fontSize: '14.5px',
+                lineHeight: '1.65',
+                fontFamily: "'Lora', Georgia, serif",
+              }}
+            />
+            <div
+              className="mt-2 pt-2 flex items-center justify-between"
+              style={{ borderTop: '1px solid oklch(0.30 0.050 76 / 0.5)' }}
+            >
+              <span
+                className={`text-xs italic ${overCap ? 'text-red-400' : ''}`}
+                style={{ color: overCap ? undefined : 'var(--color-text-dim)', fontFamily: "'Lora', Georgia, serif" }}
+              >
+                {words}/{WORD_CAP} words
+              </span>
+              <button
+                onClick={() => takeTurn(input)}
+                disabled={loading || !input.trim() || overCap}
+                className="rounded-sm px-6 py-[9px] text-sm font-semibold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                style={{
+                  background: 'linear-gradient(180deg, var(--color-gold) 0%, var(--color-gold-dark) 100%)',
+                  color: 'oklch(0.17 0.050 150)',
+                  fontFamily: "'Lora', Georgia, serif",
+                  letterSpacing: '0.06em',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,228,110,0.25)',
+                }}
+              >
+                {loading ? 'Sending…' : 'Send →'}
+              </button>
+            </div>
+            {error && (
+              <div className="mt-2 flex items-center gap-3 text-sm text-red-400">
+                <span>{error}</span>
+                {failedInput && (
+                  <button
+                    onClick={() => takeTurn(failedInput)}
+                    disabled={loading}
+                    className="border border-red-400/40 px-2 py-0.5 text-red-200 transition hover:bg-red-400/10 disabled:cursor-not-allowed disabled:opacity-50 rounded-sm"
+                  >
+                    Try again
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Suggested actions — below the input, as optional prompts. */}
+          {actions.length > 0 && (
+            <>
+              <p className="mt-3 text-xs text-text-muted" style={fontBody}>Or try a suggestion:</p>
+              <div className="mt-1.5 flex flex-wrap gap-2">
+                {actions.map((a, i) => (
+                  <button
+                    key={i}
+                    disabled={loading}
+                    onClick={() => takeTurn(a)}
+                    className="rounded-sm border px-4 py-2.5 text-sm text-text-body transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
+                    style={{
+                      background: 'var(--color-bg-input)',
+                      borderColor: 'var(--color-gold-mid)',
+                      fontFamily: "'Lora', Georgia, serif",
+                    }}
+                  >
+                    {a}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+          </>
+          )}
+        </main>
+
+        {/* Debug panel — dev or admin */}
+        {(import.meta.env.DEV || isAdmin) && showDebug && (
+          <aside
+            className="w-80 shrink-0 overflow-y-auto border p-4 text-xs"
+            style={{
+              borderColor: 'var(--color-gold-dim)',
+              background: 'var(--color-bg-card)',
+              maxHeight: 'calc(100dvh - 110px)',
+              fontFamily: "'Lora', Georgia, serif",
+            }}
+          >
+            <h2 className="mb-2 font-semibold text-text-primary">Debug — server-owned state</h2>
+
+            <button
+              onClick={undoLastTurn}
+              disabled={undoBusy || loading}
+              className="mb-3 w-full border rounded-sm px-3 py-2.5 text-gold-text hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50 transition"
+              style={{ borderColor: 'var(--color-gold-nav)' }}
+            >
+              {undoBusy ? 'Undoing…' : '⟲ Undo last turn (rollback)'}
+            </button>
+
+            <div className="mb-4">
+              <div className="mb-1 text-text-muted">Live wiki state (anchor: {anchor})</div>
+              <pre className="overflow-x-auto p-2 text-[11px] text-emerald-300" style={{ background: 'var(--color-bg-input)' }}>
+                {JSON.stringify(wikiState, null, 1)}
+              </pre>
+            </div>
+
+            <div className="text-text-muted">Per-turn events / advancement</div>
+            {debug.length === 0 && <div className="mt-1 text-text-dim">No turns yet.</div>}
+            {debug
+              .map((d, i) => (
+                <div
+                  key={i}
+                  className="mt-2 border rounded-sm p-2"
+                  style={{ borderColor: 'var(--color-gold-mid)' }}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="text-text-muted">Turn {i + 1}</span>
+                    {d.advanced && (
+                      <span className="text-emerald-400">
+                        {d.from} → {d.to}
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1">
+                    <span className="text-text-muted">events:</span>{' '}
+                    <span className="text-sky-300">{JSON.stringify(d.events)}</span>
+                  </div>
+                  {d.wiki_updates.length > 0 && (
+                    <div className="mt-1">
+                      <span className="text-text-muted">wiki_updates:</span>
+                      <pre className="mt-0.5 overflow-x-auto whitespace-pre-wrap text-amber-300">
+                        {JSON.stringify(d.wiki_updates, null, 1)}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              ))
+              .reverse()}
+          </aside>
+        )}
+      </div>
+    </div>
+  )
+}

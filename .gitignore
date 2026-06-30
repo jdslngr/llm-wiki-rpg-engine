@@ -1,0 +1,34 @@
+# Office lock files
+.~lock.*
+~$*
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Secrets & env (never commit real keys)
+.env
+.env.local
+*.env
+!*.env.example
+
+# Dependencies & build output
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Dev server logs
+*.log
+
+# Local Claude Code workspace (machine-specific settings, preview config)
+.claude/
+
+# Deprecated story bible (wiki/ is now the source of truth)
+story-bible---archipelago-lighthouse*.docx
+
+# Obsidian local workspace settings
+wiki/.obsidian/
+
+# graphify generated output
+graphify-out/
+.gstack/

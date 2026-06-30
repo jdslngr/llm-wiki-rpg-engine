@@ -1,0 +1,80 @@
+@import 'tailwindcss';
+
+@theme {
+  /* Backgrounds */
+  --color-bg-page:     oklch(0.188 0.058 152);   /* deep forest floor */
+  --color-bg-nav:      oklch(0.205 0.054 152);   /* nav / header bar */
+  --color-bg-surface:  oklch(0.235 0.048 150);   /* panels / modals */
+  --color-bg-story:    oklch(0.198 0.050 151);   /* story text scroll area */
+  --color-bg-input:    oklch(0.158 0.042 153);   /* form input wells */
+  --color-bg-dossier:  oklch(0.248 0.050 150);   /* character dossier banner */
+  --color-bg-card:     oklch(0.218 0.050 150);   /* input area / story cards */
+
+  /* Gold */
+  --color-gold:        oklch(0.70 0.115 76);     /* primary: buttons bg top */
+  --color-gold-dark:   oklch(0.64 0.108 76);     /* primary: buttons bg bottom */
+  --color-gold-text:   oklch(0.72 0.102 76);     /* links, "Show older turns", gold text */
+  --color-gold-border: oklch(0.50 0.082 76);     /* outer panel border / ring */
+  --color-gold-mid:    oklch(0.40 0.070 76);     /* inner card borders, input borders */
+  --color-gold-dim:    oklch(0.38 0.064 76);     /* story area border, nav border */
+  --color-gold-nav:    oklch(0.40 0.056 78);     /* nav button borders */
+
+  /* Text */
+  --color-text-primary: oklch(0.875 0.022 78);   /* warm cream — main text */
+  --color-text-body:    oklch(0.862 0.020 78);   /* story paragraphs */
+  --color-text-muted:   oklch(0.620 0.020 80);   /* muted / secondary labels */
+  --color-text-dim:     oklch(0.440 0.015 80);   /* placeholders, char count */
+  --color-text-nav:     oklch(0.720 0.020 80);   /* nav button text */
+}
+
+@utility pb-safe {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+@utility pt-safe {
+  padding-top: env(safe-area-inset-top);
+}
+
+/* ── Global defaults ─────────────────────────────────────────────────────── */
+
+body {
+  font-family: 'Lora', Georgia, serif;
+  color: var(--color-text-primary);
+  background: radial-gradient(
+    ellipse at 48% 36%,
+    oklch(0.225 0.052 152) 0%,
+    oklch(0.172 0.060 155) 72%
+  );
+  min-height: 100vh;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 7px;
+}
+::-webkit-scrollbar-track {
+  background: oklch(0.162 0.044 154);
+}
+::-webkit-scrollbar-thumb {
+  background: oklch(0.40 0.074 76);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.53 0.090 76);
+}
+
+/* Firefox scrollbar fallback */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(0.40 0.074 76) oklch(0.162 0.044 154);
+}
+
+/* ── Focus ring ──────────────────────────────────────────────────────────── */
+
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: oklch(0.64 0.105 76);
+  box-shadow: 0 0 0 3px oklch(0.64 0.105 76 / 0.13);
+}
