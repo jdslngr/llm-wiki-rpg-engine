@@ -13,6 +13,11 @@ turn, with **story progression gated in code, not by the model.**
 > architecture below — fork this repo and swap the content modules to build an entirely
 > different game. See **[FORK_GUIDE.md](FORK_GUIDE.md)**.
 
+Forks are welcome. This is a reference implementation, not an active community
+project — pull requests are not accepted. If you fork it, feel free to share in
+[Discussions](https://github.com/jdslngr/llm-wiki-rpg-engine/discussions)
+or tag [@jdslngr](https://github.com/jdslngr).
+
 ---
 
 ## The idea: the LLM Wiki pattern
