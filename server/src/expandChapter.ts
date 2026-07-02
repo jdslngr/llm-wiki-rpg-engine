@@ -106,6 +106,21 @@ these rules exactly:
 - FRAGMENT is a short chapter overview plus this chapter's "never do" guardrails. Keep it to the
   overall shape and stakes — don't spell out each beat's concrete events so plainly that the
   narrator could mistake the arc summary for things already in progress.
+- FRAGMENT must end with this exact closing block, verbatim (only reword the bracketed part with
+  this chapter's own event examples — the rest of the wording must not change):
+  "EVENTS — report an event ONLY if it is literally and explicitly depicted in the narrative text
+  you just wrote THIS turn, choosing ONLY from the allowed list provided to you. If you are not
+  certain the event is clearly shown in what you wrote, leave it out — a missed event costs
+  nothing, but a false one silently corrupts the story's state and can advance the chapter before
+  its beat actually happened. [1-3 short chapter-specific examples in the same style as: the
+  player goes down to the workshop -> entered_workshop]. Emit nothing for a turn where none of the
+  allowed events occurred (an empty events array is correct and expected — this is the common
+  case, not an exception). Never invent tokens outside the list, and never report an event as a
+  shortcut to move the story along faster.
+
+  WIKI_UPDATES — do NOT write the chapter's progress/condition fields (the engine derives those
+  from your events). Use wiki_updates ONLY for other durable changes — e.g. a relationship note or
+  trust shift on a crew member's file. When nothing else changed, return an empty array."
 - OPENING is verbatim turn-0 prose in immersive second person, plus 3 to 4 starter actions.
 - softLockThreshold is how many turns without progress before the engine gives the narrator
   a gentle steer (1–20, default 5). Pick lower for tight/tense beats, higher for slow exploration.
