@@ -31,6 +31,7 @@ if (loadedChapters) console.log(`[chapters] loaded ${loadedChapters} authored ch
 // Admin list set via ADMIN_USERNAMES env var (comma-separated).
 
 const app = express()
+app.set('trust proxy', 1)
 app.use(express.json({ limit: '1mb' }))
 app.use(cookieParser())
 

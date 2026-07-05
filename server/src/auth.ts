@@ -12,7 +12,7 @@ const SALT_ROUNDS = 12
 export const SID_COOKIE = 'sid'
 export const SID_COOKIE_OPTS = {
   httpOnly: true,
-  sameSite: 'strict' as const,
+  sameSite: 'lax' as const,
   maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
   path: '/',
 }

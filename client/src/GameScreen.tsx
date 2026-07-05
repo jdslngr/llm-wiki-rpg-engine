@@ -568,6 +568,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
           ) : (
           <>
           {/* Free-form input — first, to encourage the player to write their own action. */}
+          <div className="pb-safe">
           <div
             className="mt-[10px] rounded-sm border p-[14px_18px_12px]"
             style={{
@@ -630,6 +631,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
                 )}
               </div>
             )}
+          </div>
           </div>
 
           {/* Suggested actions — below the input, as optional prompts. */}
