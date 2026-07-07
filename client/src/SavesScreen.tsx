@@ -105,7 +105,7 @@ export default function SavesScreen({ onResume, onStartNew, onSettings, onLogout
   const fontBody: React.CSSProperties = { fontFamily: "'Lora', Georgia, serif" }
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
+    <div className="flex min-h-[100svh] items-center justify-center p-4">
       <div
         className="w-full max-w-[700px] rounded p-[36px_40px_32px]"
         style={{

@@ -67,7 +67,7 @@ export default function CharacterSelectScreen({ onStart, onBack }: Props) {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
+    <div className="flex min-h-[100svh] items-center justify-center p-4">
       <div className="w-full max-w-5xl">
         {/* Header */}
         <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">

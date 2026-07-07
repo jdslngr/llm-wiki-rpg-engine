@@ -33,7 +33,7 @@ export default function LoginScreen({ onLogin, onGoToSignup }: Props) {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-4">
+    <div className="flex min-h-[100svh] items-center justify-center p-4">
       <div
         className="flex flex-col sm:flex-row w-full max-w-[710px] overflow-hidden rounded"
         style={{

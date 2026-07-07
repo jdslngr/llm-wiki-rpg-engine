@@ -227,7 +227,7 @@ export default function AuthoringScreen({ onBack }: Props) {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-[100svh]">
       <header
         className="flex items-center justify-between gap-3 px-8 py-0 border-b"
         style={{

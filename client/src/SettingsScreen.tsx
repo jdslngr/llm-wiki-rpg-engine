@@ -136,14 +136,14 @@ export default function SettingsScreen({ onBack }: Props) {
 
   if (loading) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-text-muted">
+      <div className="flex min-h-[100svh] items-center justify-center text-text-muted">
         Loading…
       </div>
     )
   }
 
   return (
-    <div className="flex min-h-screen items-start justify-center p-4 pt-12">
+    <div className="flex min-h-[100svh] items-start justify-center p-4 pt-12">
       <div
         className="w-full max-w-[700px] rounded p-[36px_40px_32px]"
         style={panelStyle}

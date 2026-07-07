@@ -289,10 +289,10 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
   const fontBody: React.CSSProperties = { fontFamily: "'Lora', Georgia, serif" }
 
   return (
-    <div className="min-h-screen">
+    <div className="flex min-h-[100svh] flex-col">
       {/* ── Header / nav bar ─────────────────────────────────────────────── */}
       <header
-        className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 px-4 sm:px-8 py-3 border-b"
+        className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 px-safe sm:px-8 py-3 border-b"
         style={{
           background: 'var(--color-bg-nav)',
           borderColor: 'var(--color-gold-dim)',
@@ -358,17 +358,16 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
         </div>
       </header>
 
-      <div className="mx-auto flex max-w-6xl gap-4 p-4">
+      <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col gap-4 px-safe py-4 md:flex-row">
         {/* Story column */}
-        <main className="flex min-w-0 flex-1 flex-col">
+        <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div
             ref={logRef}
             onScroll={handleTranscriptScroll}
-            className="flex-1 space-y-4 overflow-y-auto border p-5"
+            className="story-log min-h-[180px] flex-1 space-y-4 overflow-y-auto overscroll-contain border p-5 sm:min-h-[260px]"
             style={{
               background: 'var(--color-bg-story)',
               borderColor: 'var(--color-gold-dim)',
-              maxHeight: 'calc(100dvh - 230px)',
             }}
           >
             {/* Character dossier — collapsible on mobile; tap chip to expand */}
@@ -568,7 +567,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
           ) : (
           <>
           {/* Free-form input — first, to encourage the player to write their own action. */}
-          <div className="pb-safe">
+          <div className="pb-safe-room">
           <div
             className="mt-[10px] rounded-sm border p-[14px_18px_12px]"
             style={{
@@ -587,7 +586,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
               disabled={loading}
               className="w-full border-none bg-transparent text-text-body placeholder:text-text-dim/70 disabled:opacity-60 resize-none"
               style={{
-                fontSize: '14.5px',
+                fontSize: '16px',
                 lineHeight: '1.65',
                 fontFamily: "'Lora', Georgia, serif",
               }}
@@ -664,11 +663,11 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
         {/* Debug panel — dev or admin */}
         {(import.meta.env.DEV || isAdmin) && showDebug && (
           <aside
-            className="w-80 shrink-0 overflow-y-auto border p-4 text-xs"
+            className="w-full overflow-y-auto border p-4 text-xs md:w-80 md:shrink-0"
             style={{
               borderColor: 'var(--color-gold-dim)',
               background: 'var(--color-bg-card)',
-              maxHeight: 'calc(100dvh - 110px)',
+              maxHeight: 'min(40svh, 420px)',
               fontFamily: "'Lora', Georgia, serif",
             }}
           >

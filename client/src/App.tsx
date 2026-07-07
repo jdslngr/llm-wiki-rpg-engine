@@ -101,7 +101,7 @@ export default function App() {
 
   if (screen === 'booting') {
     return (
-      <div className="flex min-h-screen items-center justify-center text-text-muted">
+      <div className="flex min-h-[100svh] items-center justify-center text-text-muted">
         Loading…
       </div>
     )
@@ -155,7 +155,7 @@ export default function App() {
 
   // Fallback (shouldn't happen): no game state but screen is 'game'.
   return (
-    <div className="flex min-h-screen items-center justify-center text-text-muted">
+    <div className="flex min-h-[100svh] items-center justify-center text-text-muted">
       Something went wrong.{' '}
       <button onClick={handleLogout} className="ml-2 underline">
         Start over

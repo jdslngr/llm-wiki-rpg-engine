@@ -91,10 +91,10 @@ export default function RecapScreen({ onBackToSaves, onContinue }: Props) {
   }
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-[100svh]">
       {/* Soft top wash to make this feel like a payoff moment. */}
       <div style={{ background: 'linear-gradient(to bottom, oklch(0.35 0.060 76 / 0.10), transparent)' }}>
-        <div className="mx-auto w-full max-w-2xl px-5 pt-10 pb-4 text-center">
+        <div className="mx-auto w-full max-w-2xl px-safe pt-10 pb-4 text-center">
           <p className="text-xs uppercase tracking-[0.2em] text-text-muted" style={fontBody}>
             {facts ? `Chapter ${facts.chapterNumber} Complete` : '…'}
           </p>
@@ -104,7 +104,7 @@ export default function RecapScreen({ onBackToSaves, onContinue }: Props) {
         </div>
       </div>
 
-      <div className="mx-auto w-full max-w-2xl px-5 pb-48">
+      <div className="mx-auto w-full max-w-2xl px-safe pb-48">
         {loading ? (
           <div className="py-16 text-center">
             <p className="animate-pulse text-sm text-text-muted" style={fontBody}>Writing your recap…</p>
@@ -197,7 +197,7 @@ export default function RecapScreen({ onBackToSaves, onContinue }: Props) {
 
       {/* Sticky bottom action bar — thumb-reachable on mobile. */}
       <div
-        className="fixed inset-x-0 bottom-0 border-t backdrop-blur pb-safe"
+        className="fixed inset-x-0 bottom-0 border-t backdrop-blur pb-safe-room"
         style={{
           borderColor: 'var(--color-gold-dim)',
           background: 'oklch(0.188 0.058 152 / 0.95)',

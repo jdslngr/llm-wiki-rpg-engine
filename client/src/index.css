@@ -34,6 +34,19 @@
   padding-top: env(safe-area-inset-top);
 }
 
+@utility pb-safe-room {
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+@utility pt-safe-room {
+  padding-top: max(12px, env(safe-area-inset-top));
+}
+
+@utility px-safe {
+  padding-left: max(20px, env(safe-area-inset-left));
+  padding-right: max(20px, env(safe-area-inset-right));
+}
+
 /* ── Global defaults ─────────────────────────────────────────────────────── */
 
 body {
@@ -45,6 +58,15 @@ body {
     oklch(0.172 0.060 155) 72%
   );
   min-height: 100vh;
+  overflow-x: hidden;
+  text-size-adjust: 100%;
+}
+
+/* ── Scroll guard for the story area ─────────────────────────────────────── */
+
+.story-log {
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
 }
 
 /* ── Scrollbar ───────────────────────────────────────────────────────────── */
@@ -77,4 +99,16 @@ select:focus {
   outline: none;
   border-color: oklch(0.64 0.105 76);
   box-shadow: 0 0 0 3px oklch(0.64 0.105 76 / 0.13);
+}
+
+/* Prevent iOS from zooming when focusing small form controls.
+   Inline font-size styles beat this rule, so check for inline
+   fontSize below 16px on inputs/textareas/selects before relying
+   on this alone. */
+@media (max-width: 640px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
 }
