@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { Dossier, DoneFrame, GameState, Turn, WikiState, WikiUpdate } from './types'
 
 const WORD_CAP = 300
@@ -51,6 +51,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
   const [dossierOpen, setDossierOpen] = useState(false)
   const [showAllTurns, setShowAllTurns] = useState(false)
   const [isScrolledUp, setIsScrolledUp] = useState(false)
+  const [isScrolledFromTop, setIsScrolledFromTop] = useState(false)
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -70,6 +71,45 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
   // Set by takeTurn just before state updates; the effect reads and clears it so
   // the player's just-sent message scrolls to the top of the viewport once.
   const snapPlayerToTop = useRef(false)
+
+  // Keep the input compact for short actions, then grow it with the player's text.
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const textareaWidthRef = useRef<number | null>(null)
+  const textareaFrameRef = useRef<number | null>(null)
+
+  const resizeToFit = useCallback(() => {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    const borderHeight = el.offsetHeight - el.clientHeight
+    el.style.height = `${el.scrollHeight + borderHeight}px`
+  }, [])
+
+  useLayoutEffect(() => {
+    resizeToFit()
+  }, [resizeToFit, input])
+
+  useLayoutEffect(() => {
+    const el = textareaRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    textareaWidthRef.current = el.getBoundingClientRect().width
+    const observer = new ResizeObserver(([entry]) => {
+      const width = entry.contentRect.width
+      if (width === textareaWidthRef.current) return
+      textareaWidthRef.current = width
+      if (textareaFrameRef.current !== null) cancelAnimationFrame(textareaFrameRef.current)
+      textareaFrameRef.current = requestAnimationFrame(() => {
+        textareaFrameRef.current = null
+        resizeToFit()
+      })
+    })
+    observer.observe(el)
+    return () => {
+      observer.disconnect()
+      if (textareaFrameRef.current !== null) cancelAnimationFrame(textareaFrameRef.current)
+    }
+  }, [resizeToFit])
+
   useEffect(() => {
     const el = logRef.current
     if (!el) return
@@ -134,8 +174,15 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
   function handleTranscriptScroll() {
     const el = logRef.current
     if (!el) return
-    const distFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    setIsScrolledUp(distFromBottom > 300)
+    const scrollable = el.scrollHeight - el.clientHeight
+    const NEAR_EDGE = 20
+    if (scrollable <= 300) {
+      setIsScrolledUp(false)
+      setIsScrolledFromTop(false)
+      return
+    }
+    setIsScrolledUp(el.scrollTop <= NEAR_EDGE)
+    setIsScrolledFromTop(el.scrollTop >= scrollable - NEAR_EDGE)
   }
 
   const words = wordCount(input)
@@ -370,6 +417,28 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
               borderColor: 'var(--color-gold-dim)',
             }}
           >
+            {/* Back-to-top — appears only right at the bottom edge */}
+            {isScrolledFromTop && (
+              <div className="sticky top-4 flex justify-center">
+                <button
+                  onClick={() => {
+                    logRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+                    setIsScrolledFromTop(false)
+                  }}
+                  aria-label="Scroll to top"
+                  title="Back to top"
+                  className="w-9 h-9 rounded-sm flex items-center justify-center text-lg font-semibold shadow-lg transition hover:opacity-90"
+                  style={{
+                    background: 'linear-gradient(180deg, var(--color-gold) 0%, var(--color-gold-dark) 100%)',
+                    color: 'oklch(0.17 0.050 150)',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,228,110,0.25)',
+                  }}
+                >
+                  ↑
+                </button>
+              </div>
+            )}
+
             {/* Character dossier — collapsible on mobile; tap chip to expand */}
             {character && (
               dossierOpen ? (
@@ -448,7 +517,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
                     t.role === 'ai' ? (
                       <div
                         key={turnCutoff + i}
-                        className="whitespace-pre-wrap mb-6"
+                        className="whitespace-pre-wrap break-words mb-6"
                         style={{
                           fontSize: '16.5px',
                           lineHeight: '1.88',
@@ -462,7 +531,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
                     ) : (
                       <div key={turnCutoff + i} className="flex justify-end" data-role="player">
                         <div
-                          className="max-w-[80%] px-3 py-3"
+                          className="max-w-[80%] px-3 py-3 whitespace-pre-wrap break-words"
                           style={{
                             background: 'oklch(0.218 0.050 150)',
                             border: '1px solid var(--color-gold-dim)',
@@ -483,7 +552,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
             {loading && pendingInput && (
               <div className="flex justify-end" data-role="player">
                 <div
-                  className="max-w-[80%] px-3 py-3"
+                  className="max-w-[80%] px-3 py-3 whitespace-pre-wrap break-words"
                   style={{
                     background: 'oklch(0.218 0.050 150)',
                     border: '1px solid var(--color-gold-dim)',
@@ -497,7 +566,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
             )}
             {loading && (
               <div
-                className="whitespace-pre-wrap mb-6"
+                className="whitespace-pre-wrap break-words mb-6"
                 style={{
                   fontSize: '16.5px',
                   lineHeight: '1.88',
@@ -517,7 +586,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
               </div>
             )}
 
-            {/* Jump-to-latest — appears when scrolled up reading older turns */}
+            {/* Jump-to-latest — appears only right at the top edge */}
             {isScrolledUp && (
               <div className="sticky bottom-4 flex justify-center">
                 <button
@@ -525,15 +594,16 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
                     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' })
                     setIsScrolledUp(false)
                   }}
-                  className="rounded-sm px-4 py-2.5 text-sm font-semibold shadow-lg transition hover:opacity-90"
+                  aria-label="Scroll to latest"
+                  title="Down to latest"
+                  className="w-9 h-9 rounded-sm flex items-center justify-center text-lg font-semibold shadow-lg transition hover:opacity-90"
                   style={{
                     background: 'linear-gradient(180deg, var(--color-gold) 0%, var(--color-gold-dark) 100%)',
                     color: 'oklch(0.17 0.050 150)',
-                    fontFamily: "'Lora', Georgia, serif",
                     boxShadow: '0 2px 8px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,228,110,0.25)',
                   }}
                 >
-                  Down to latest
+                  ↓
                 </button>
               </div>
             )}
@@ -582,9 +652,10 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) takeTurn(input)
               }}
               placeholder="What do you do? Write your own action… (⌘/Ctrl + Enter to send)"
-              rows={3}
+              ref={textareaRef}
+              rows={1}
               disabled={loading}
-              className="w-full border-none bg-transparent text-text-body placeholder:text-text-dim/70 disabled:opacity-60 resize-none"
+              className="w-full max-h-[200px] resize-none overflow-y-auto border-none bg-transparent text-text-body placeholder:text-text-dim/70 disabled:opacity-60"
               style={{
                 fontSize: '16px',
                 lineHeight: '1.65',
