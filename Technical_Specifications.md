@@ -392,7 +392,7 @@ additionally require the session's username to be listed in `ADMIN_USERNAMES`.
 | `SavesScreen.tsx` | "Your Stories" — list, resume, start new, settings, logout, authoring link. |
 | `CharacterSelectScreen.tsx` | Choose a crew member or the Visitor; starts a new game. |
 | `characterCards.ts` | Static per-character card data (emoji, summary, gear) for the character select screen. |
-| `GameScreen.tsx` | The turn loop UI — header, wiki/debug context, chat, streamed response. |
+| `GameScreen.tsx` | Responsive turn-loop UI — scrollable transcript with edge navigation, compact header menu, collapsible dossier/suggestions, auto-growing input, streamed response, and admin debug context. |
 | `RecapScreen.tsx` | Chapter-end recap + "Continue to Chapter N" / story-complete state. |
 | `SettingsScreen.tsx` | BYOK/hosted settings, key entry + validation. |
 | `AuthoringScreen.tsx` | Admin chapter-authoring UI (brief → expand → review → save/edit/delete). |
