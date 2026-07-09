@@ -332,6 +332,14 @@ The first 390×844 browser pass exposed two differences between the upstream ass
 
 These corrections are necessary for the Step 2 controls to be visible and clickable in this fork.
 
+## Post-Implementation Bug-Fix Audit
+
+A follow-up audit after commit `98cc501` found and fixed three additional issues:
+
+- Transcript-navigation state was only calculated after a scroll event. It is now initialized after layout, recalculated when transcript content changes, and kept current with a `ResizeObserver`.
+- The suggestions toggle could reopen stale suggestions during an in-flight turn. It is now disabled while loading.
+- Mobile menu labels wrapped unnecessarily. The panel now has a stable minimum width, no-wrap items, and explicit expanded/popup accessibility state.
+
 ## Validation Plan
 
 ### Automated checks

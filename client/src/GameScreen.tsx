@@ -182,7 +182,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
     }
   }
 
-  function handleTranscriptScroll() {
+  const handleTranscriptScroll = useCallback(() => {
     const el = logRef.current
     if (!el) return
     const scrollable = el.scrollHeight - el.clientHeight
@@ -194,7 +194,23 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
     }
     setIsScrolledUp(el.scrollTop <= NEAR_EDGE)
     setIsScrolledFromTop(el.scrollTop >= scrollable - NEAR_EDGE)
-  }
+  }, [])
+
+  useLayoutEffect(() => {
+    handleTranscriptScroll()
+  }, [dossierOpen, handleTranscriptScroll, history, loading, showAllTurns, streamingText])
+
+  useEffect(() => {
+    const el = logRef.current
+    if (!el) return
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', handleTranscriptScroll)
+      return () => window.removeEventListener('resize', handleTranscriptScroll)
+    }
+    const observer = new ResizeObserver(handleTranscriptScroll)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [handleTranscriptScroll])
 
   const words = wordCount(input)
   const overCap = words > WORD_CAP
@@ -371,6 +387,8 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
         <div className="relative shrink-0">
           <button
             onClick={() => setNavMenuOpen((open) => !open)}
+            aria-expanded={navMenuOpen}
+            aria-haspopup="true"
             className="relative z-50 text-xs border rounded-sm px-[14px] py-1.5 text-gold-text hover:opacity-80 transition"
             style={{ borderColor: 'var(--color-gold-nav)', fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
           >
@@ -380,7 +398,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
             <>
               <div className="fixed inset-0 z-40" onClick={() => setNavMenuOpen(false)} />
               <div
-                className="absolute right-0 top-full z-50 mt-1 rounded-sm py-1"
+                className="absolute right-0 top-full z-50 mt-1 min-w-40 rounded-sm py-1"
                 style={{
                   background: 'var(--color-bg-surface)',
                   boxShadow: '0 0 0 1px var(--color-gold-border)',
@@ -389,7 +407,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
                 <button
                   onClick={() => { exportStory(); setNavMenuOpen(false) }}
                   title="Download this story so far as a Markdown file"
-                  className="min-h-11 w-full flex items-center px-4 text-xs text-gold-text hover:opacity-80 transition"
+                  className="min-h-11 w-full flex items-center whitespace-nowrap px-4 text-xs text-gold-text hover:opacity-80 transition"
                   style={{ fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
                 >
                   ⤓ Export
@@ -397,7 +415,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
                 {onBackToSaves && (
                   <button
                     onClick={() => { onBackToSaves(); setNavMenuOpen(false) }}
-                    className="min-h-11 w-full flex items-center px-4 text-xs text-gold-text hover:opacity-80 transition"
+                    className="min-h-11 w-full flex items-center whitespace-nowrap px-4 text-xs text-gold-text hover:opacity-80 transition"
                     style={{ fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
                   >
                     ← Your Stories
@@ -406,7 +424,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
                 {(import.meta.env.DEV || isAdmin) && (
                   <button
                     onClick={() => { setShowDebug((visible) => !visible); setNavMenuOpen(false) }}
-                    className="min-h-11 w-full flex items-center px-4 text-xs text-gold-text hover:opacity-80 transition"
+                    className="min-h-11 w-full flex items-center whitespace-nowrap px-4 text-xs text-gold-text hover:opacity-80 transition"
                     style={{ fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
                   >
                     {showDebug ? 'Hide' : 'Show'} debug
@@ -415,7 +433,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
                 {onSettings && (
                   <button
                     onClick={() => { onSettings(); setNavMenuOpen(false) }}
-                    className="min-h-11 w-full flex items-center px-4 text-xs text-gold-text hover:opacity-80 transition"
+                    className="min-h-11 w-full flex items-center whitespace-nowrap px-4 text-xs text-gold-text hover:opacity-80 transition"
                     style={{ fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
                   >
                     Settings
@@ -427,7 +445,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
                     onLogout()
                     setNavMenuOpen(false)
                   }}
-                  className="min-h-11 w-full flex items-center px-4 text-xs text-gold-text hover:opacity-80 transition"
+                  className="min-h-11 w-full flex items-center whitespace-nowrap px-4 text-xs text-gold-text hover:opacity-80 transition"
                   style={{ fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
                 >
                   Log out
@@ -734,7 +752,8 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
                 {actions.length > 0 && (
                   <button
                     onClick={() => setSuggestionsOpen((open) => !open)}
-                    className="rounded-sm border px-4 py-2.5 text-sm transition hover:opacity-80"
+                    disabled={loading}
+                    className="rounded-sm border px-4 py-2.5 text-sm transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
                     style={{
                       background: 'var(--color-bg-input)',
                       borderColor: 'var(--color-gold-mid)',
