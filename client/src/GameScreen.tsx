@@ -52,6 +52,8 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
   const [showAllTurns, setShowAllTurns] = useState(false)
   const [isScrolledUp, setIsScrolledUp] = useState(false)
   const [isScrolledFromTop, setIsScrolledFromTop] = useState(false)
+  const [suggestionsOpen, setSuggestionsOpen] = useState(false)
+  const [navMenuOpen, setNavMenuOpen] = useState(false)
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -59,6 +61,15 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
       .then((d) => setIsAdmin(!!d?.user?.isAdmin))
       .catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (!navMenuOpen) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setNavMenuOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [navMenuOpen])
 
   const logRef = useRef<HTMLDivElement>(null)
   // Scroll behaviour: jump to the TOP on a fresh load (mount, new game, resume,
@@ -229,6 +240,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
     setPendingInput(playerInput)
     setStreamingText('')
     setInput('')
+    setSuggestionsOpen(false)
     const priorHistory = history
 
     // Abort a turn that runs past the timeout so the spinner can never hang.
@@ -336,10 +348,10 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
   const fontBody: React.CSSProperties = { fontFamily: "'Lora', Georgia, serif" }
 
   return (
-    <div className="flex min-h-[100svh] flex-col">
+    <div className="flex h-[100svh] flex-col">
       {/* ── Header / nav bar ─────────────────────────────────────────────── */}
       <header
-        className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-3 px-safe sm:px-8 py-3 border-b"
+        className="flex items-center justify-between gap-2 px-safe py-3 border-b sm:px-8"
         style={{
           background: 'var(--color-bg-nav)',
           borderColor: 'var(--color-gold-dim)',
@@ -350,58 +362,79 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
           <h1 className="text-[15px] font-medium text-text-primary" style={fontTitle}>
             Archipelago Lighthouse
           </h1>
-          <p className="text-xs italic text-text-muted mt-1" style={fontBody}>
+          <p className="mt-1 truncate text-xs italic text-text-muted" style={fontBody}>
             Chapter {chapterNumber} · {chapterTitle}
             <span className="mx-1.5 text-text-dim">·</span>
             <span className="text-text-muted">{anchorTitle}</span>
           </p>
         </div>
-        <div className="flex items-center gap-1 flex-wrap">
+        <div className="relative shrink-0">
           <button
-            onClick={exportStory}
-            title="Download this story so far as a Markdown file"
-            className="text-xs border rounded-sm px-[14px] py-1.5 text-gold-text hover:opacity-80 transition"
+            onClick={() => setNavMenuOpen((open) => !open)}
+            className="relative z-50 text-xs border rounded-sm px-[14px] py-1.5 text-gold-text hover:opacity-80 transition"
             style={{ borderColor: 'var(--color-gold-nav)', fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
           >
-            ⤓ Export
+            Menu {navMenuOpen ? '▴' : '▾'}
           </button>
-          {onBackToSaves && (
-            <button
-              onClick={onBackToSaves}
-              className="text-xs border rounded-sm px-[14px] py-1.5 text-gold-text hover:opacity-80 transition"
-              style={{ borderColor: 'var(--color-gold-nav)', fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
-            >
-              ← Your Stories
-            </button>
+          {navMenuOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setNavMenuOpen(false)} />
+              <div
+                className="absolute right-0 top-full z-50 mt-1 rounded-sm py-1"
+                style={{
+                  background: 'var(--color-bg-surface)',
+                  boxShadow: '0 0 0 1px var(--color-gold-border)',
+                }}
+              >
+                <button
+                  onClick={() => { exportStory(); setNavMenuOpen(false) }}
+                  title="Download this story so far as a Markdown file"
+                  className="min-h-11 w-full flex items-center px-4 text-xs text-gold-text hover:opacity-80 transition"
+                  style={{ fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
+                >
+                  ⤓ Export
+                </button>
+                {onBackToSaves && (
+                  <button
+                    onClick={() => { onBackToSaves(); setNavMenuOpen(false) }}
+                    className="min-h-11 w-full flex items-center px-4 text-xs text-gold-text hover:opacity-80 transition"
+                    style={{ fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
+                  >
+                    ← Your Stories
+                  </button>
+                )}
+                {(import.meta.env.DEV || isAdmin) && (
+                  <button
+                    onClick={() => { setShowDebug((visible) => !visible); setNavMenuOpen(false) }}
+                    className="min-h-11 w-full flex items-center px-4 text-xs text-gold-text hover:opacity-80 transition"
+                    style={{ fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
+                  >
+                    {showDebug ? 'Hide' : 'Show'} debug
+                  </button>
+                )}
+                {onSettings && (
+                  <button
+                    onClick={() => { onSettings(); setNavMenuOpen(false) }}
+                    className="min-h-11 w-full flex items-center px-4 text-xs text-gold-text hover:opacity-80 transition"
+                    style={{ fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
+                  >
+                    Settings
+                  </button>
+                )}
+                <button
+                  onClick={async () => {
+                    try { await fetch('/api/auth/logout', { method: 'POST' }) } catch { /* ok */ }
+                    onLogout()
+                    setNavMenuOpen(false)
+                  }}
+                  className="min-h-11 w-full flex items-center px-4 text-xs text-gold-text hover:opacity-80 transition"
+                  style={{ fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
+                >
+                  Log out
+                </button>
+              </div>
+            </>
           )}
-          {(import.meta.env.DEV || isAdmin) && (
-            <button
-              onClick={() => setShowDebug((v) => !v)}
-              className="text-xs border rounded-sm px-[14px] py-1.5 text-gold-text hover:opacity-80 transition"
-              style={{ borderColor: 'var(--color-gold-nav)', fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
-            >
-              {showDebug ? 'Hide' : 'Show'} debug
-            </button>
-          )}
-          {onSettings && (
-            <button
-              onClick={onSettings}
-              className="text-xs border rounded-sm px-[14px] py-1.5 text-gold-text hover:opacity-80 transition"
-              style={{ borderColor: 'var(--color-gold-nav)', fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
-            >
-              Settings
-            </button>
-          )}
-          <button
-            onClick={async () => {
-              try { await fetch('/api/auth/logout', { method: 'POST' }) } catch { /* ok */ }
-              onLogout()
-            }}
-            className="text-xs border rounded-sm px-[14px] py-1.5 text-gold-text hover:opacity-80 transition"
-            style={{ borderColor: 'var(--color-gold-nav)', fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
-          >
-            Log out
-          </button>
         </div>
       </header>
 
@@ -417,16 +450,16 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
               borderColor: 'var(--color-gold-dim)',
             }}
           >
-            {/* Back-to-top — appears only right at the bottom edge */}
-            {isScrolledFromTop && (
+            {/* Jump-to-latest — appears only right at the top edge */}
+            {isScrolledUp && (
               <div className="sticky top-4 flex justify-center">
                 <button
                   onClick={() => {
-                    logRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
-                    setIsScrolledFromTop(false)
+                    logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' })
+                    setIsScrolledUp(false)
                   }}
-                  aria-label="Scroll to top"
-                  title="Back to top"
+                  aria-label="Scroll to latest"
+                  title="Down to latest"
                   className="w-9 h-9 rounded-sm flex items-center justify-center text-lg font-semibold shadow-lg transition hover:opacity-90"
                   style={{
                     background: 'linear-gradient(180deg, var(--color-gold) 0%, var(--color-gold-dark) 100%)',
@@ -434,7 +467,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
                     boxShadow: '0 2px 8px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,228,110,0.25)',
                   }}
                 >
-                  ↑
+                  ↓
                 </button>
               </div>
             )}
@@ -586,16 +619,16 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
               </div>
             )}
 
-            {/* Jump-to-latest — appears only right at the top edge */}
-            {isScrolledUp && (
+            {/* Back-to-top — appears only right at the bottom edge */}
+            {isScrolledFromTop && (
               <div className="sticky bottom-4 flex justify-center">
                 <button
                   onClick={() => {
-                    logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' })
-                    setIsScrolledUp(false)
+                    logRef.current?.scrollTo({ top: 0, behavior: 'smooth' })
+                    setIsScrolledFromTop(false)
                   }}
-                  aria-label="Scroll to latest"
-                  title="Down to latest"
+                  aria-label="Scroll to top"
+                  title="Back to top"
                   className="w-9 h-9 rounded-sm flex items-center justify-center text-lg font-semibold shadow-lg transition hover:opacity-90"
                   style={{
                     background: 'linear-gradient(180deg, var(--color-gold) 0%, var(--color-gold-dark) 100%)',
@@ -603,7 +636,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
                     boxShadow: '0 2px 8px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,228,110,0.25)',
                   }}
                 >
-                  ↓
+                  ↑
                 </button>
               </div>
             )}
@@ -662,6 +695,31 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
                 fontFamily: "'Lora', Georgia, serif",
               }}
             />
+
+            {/* Suggested actions — toggle expands between textarea and footer */}
+            {suggestionsOpen && actions.length > 0 && (
+              <>
+                <p className="mt-3 text-xs text-text-muted" style={fontBody}>Or try a suggestion:</p>
+                <div className="mt-1.5 flex flex-wrap gap-2">
+                  {actions.map((a, i) => (
+                    <button
+                      key={i}
+                      disabled={loading}
+                      onClick={() => takeTurn(a)}
+                      className="rounded-sm border px-4 py-2.5 text-sm text-text-body transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
+                      style={{
+                        background: 'var(--color-bg-input)',
+                        borderColor: 'var(--color-gold-mid)',
+                        fontFamily: "'Lora', Georgia, serif",
+                      }}
+                    >
+                      {a}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
             <div
               className="mt-2 pt-2 flex items-center justify-between"
               style={{ borderTop: '1px solid oklch(0.30 0.050 76 / 0.5)' }}
@@ -672,20 +730,35 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
               >
                 {words}/{WORD_CAP} words
               </span>
-              <button
-                onClick={() => takeTurn(input)}
-                disabled={loading || !input.trim() || overCap}
-                className="rounded-sm px-6 py-[9px] text-sm font-semibold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-                style={{
-                  background: 'linear-gradient(180deg, var(--color-gold) 0%, var(--color-gold-dark) 100%)',
-                  color: 'oklch(0.17 0.050 150)',
-                  fontFamily: "'Lora', Georgia, serif",
-                  letterSpacing: '0.06em',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,228,110,0.25)',
-                }}
-              >
-                {loading ? 'Sending…' : 'Send →'}
-              </button>
+              <div className="flex items-center gap-2">
+                {actions.length > 0 && (
+                  <button
+                    onClick={() => setSuggestionsOpen((open) => !open)}
+                    className="rounded-sm border px-4 py-2.5 text-sm transition hover:opacity-80"
+                    style={{
+                      background: 'var(--color-bg-input)',
+                      borderColor: 'var(--color-gold-mid)',
+                      color: 'var(--color-text-muted)',
+                      fontFamily: "'Lora', Georgia, serif",
+                    }}
+                  >
+                    {suggestionsOpen ? 'Hide suggestions' : 'Suggestions'}
+                  </button>
+                )}
+                <button
+                  onClick={() => takeTurn(input)}
+                  disabled={loading || !input.trim() || overCap}
+                  aria-label={loading ? 'Sending action' : 'Send action'}
+                  title="Send (⌘/Ctrl + Enter)"
+                  className={`flex items-center justify-center rounded-sm p-[11px] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50 ${loading ? 'animate-pulse' : ''}`}
+                  style={{
+                    background: 'linear-gradient(180deg, var(--color-gold) 0%, var(--color-gold-dark) 100%)',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,228,110,0.25)',
+                  }}
+                >
+                  <span aria-hidden="true" style={{ fontSize: '22px', lineHeight: 1 }}>✒️</span>
+                </button>
+              </div>
             </div>
             {error && (
               <div className="mt-2 flex items-center gap-3 text-sm text-red-400">
@@ -704,29 +777,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
           </div>
           </div>
 
-          {/* Suggested actions — below the input, as optional prompts. */}
-          {actions.length > 0 && (
-            <>
-              <p className="mt-3 text-xs text-text-muted" style={fontBody}>Or try a suggestion:</p>
-              <div className="mt-1.5 flex flex-wrap gap-2">
-                {actions.map((a, i) => (
-                  <button
-                    key={i}
-                    disabled={loading}
-                    onClick={() => takeTurn(a)}
-                    className="rounded-sm border px-4 py-2.5 text-sm text-text-body transition hover:opacity-80 disabled:cursor-not-allowed disabled:opacity-50"
-                    style={{
-                      background: 'var(--color-bg-input)',
-                      borderColor: 'var(--color-gold-mid)',
-                      fontFamily: "'Lora', Georgia, serif",
-                    }}
-                  >
-                    {a}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
+
           </>
           )}
         </main>

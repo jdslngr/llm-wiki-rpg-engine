@@ -16,6 +16,8 @@ The source project has a GitHub remote at `jdslngr/archipelago-lighthouse`. Its 
 
 Do not blindly cherry-pick the upstream commits. This fork already contains some of the same iOS work and has diverged in other areas. Port the remaining behavior deliberately, one small change at a time.
 
+Implementation update, 2026-07-09: all six steps were implemented. Browser QA also found and corrected two fork-specific issues documented under **As-Built Browser-QA Corrections**.
+
 ## Goal
 
 Make `client/src/GameScreen.tsx` easier to read and operate on a phone without changing game rules, server behavior, story generation, save data, or the desktop information architecture.
@@ -41,7 +43,7 @@ Current target baseline: `d16d742` (`fix: iOS browser rendering optimizations �
 
 | Area | Current state | Planning decision |
 | --- | --- | --- |
-| Small viewport height | `GameScreen` already uses `min-h-[100svh]` | Keep it |
+| Small viewport height | The baseline used `min-h-[100svh]` | Browser QA required `h-[100svh]` so the transcript becomes a real scroll area |
 | iOS input font size | The game textarea already uses an inline `fontSize: '16px'` | Do not repeat the source plan's font bump |
 | Safe-area floor | `index.css` already defines `pb-safe-room` with a 12px minimum | Keep it |
 | Input safe area | The input card is already wrapped in `pb-safe-room` | Keep it |
@@ -153,8 +155,8 @@ This intentionally uses the final upstream behavior from `4e65cf5`, not the earl
 
 Control placement:
 
-- Back-to-top is the first child inside the scrollable story log and uses `sticky top-4`.
-- Down-to-latest remains the last child and uses `sticky bottom-4`.
+- Down-to-latest is the first child inside the scrollable story log and uses `sticky top-4`.
+- Back-to-top is the last child and uses `sticky bottom-4`.
 - Both controls are `w-9 h-9` icon-only squares.
 - Use plain `↑` and `↓` glyphs.
 - Give each button an `aria-label` and a descriptive `title`.
@@ -320,6 +322,15 @@ Acceptance checks:
 Suggested commit:
 
 `feat: collapse game header actions into a menu`
+
+## As-Built Browser-QA Corrections
+
+The first 390×844 browser pass exposed two differences between the upstream assumptions and this fork:
+
+1. `min-h-[100svh]` allowed the story log to expand to its full content height, leaving no internal scroll range. The root was changed to `h-[100svh]`, retaining the existing iOS-safe viewport unit while constraining the transcript correctly.
+2. The upstream control placement inserted down-to-latest at the end of the transcript and back-to-top at the beginning. Both existed in the DOM but were outside the visible scroll edge when needed. Their positions were swapped so down-to-latest is physically near the top and back-to-top is physically near the bottom.
+
+These corrections are necessary for the Step 2 controls to be visible and clickable in this fork.
 
 ## Validation Plan
 
