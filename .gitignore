@@ -32,3 +32,6 @@ wiki/.obsidian/
 # graphify generated output
 graphify-out/
 .gstack/
+
+# Implementation plans (local working documents)
+*_PLAN.md
