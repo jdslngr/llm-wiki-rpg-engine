@@ -71,6 +71,7 @@ export interface PlaythroughStore {
 }
 
 const SESSION_TTL_MS = 1000 * 60 * 60 * 24 * 7 // 7 days
+const SNAPSHOT_CAP = 20 // per playthrough — generous enough that debug rollback stays useful
 
 // --- In-memory backend ------------------------------------------------------
 class MemStore implements PlaythroughStore {
@@ -102,6 +103,7 @@ class MemStore implements PlaythroughStore {
   async snapshot(id: string, wiki: WikiMap): Promise<void> {
     const list = this.history.get(id) ?? []
     list.push(structuredClone(wiki))
+    if (list.length > SNAPSHOT_CAP) list.splice(0, list.length - SNAPSHOT_CAP)
     this.history.set(id, list)
   }
   async getLastSnapshot(id: string): Promise<WikiMap | null> {
@@ -290,6 +292,16 @@ class PgStore implements PlaythroughStore {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
 
+      -- One-time trim of snapshots accumulated before the cap existed (no-op once clean).
+      -- The literal 20 must stay in sync with the SNAPSHOT_CAP TypeScript constant above.
+      DELETE FROM wiki_history WHERE id IN (
+        SELECT id FROM (
+          SELECT id, row_number() OVER (
+            PARTITION BY playthrough_id ORDER BY id DESC
+          ) rn FROM wiki_history
+        ) t WHERE rn > 20
+      );
+
       -- Repair rows corrupted by the pre-fix "null" string bug (no-op once clean;
       -- safe to re-run every boot, same pattern as the ALTER TABLE migrations above).
       UPDATE users SET llm_provider = NULL WHERE llm_provider = 'null';
@@ -390,6 +402,17 @@ class PgStore implements PlaythroughStore {
       id,
       JSON.stringify(wiki),
     ])
+    // Keep only the N most recent snapshots for this playthrough.
+    await this.pool.query(
+      `DELETE FROM wiki_history
+       WHERE playthrough_id = $1
+         AND id NOT IN (
+           SELECT id FROM wiki_history
+           WHERE playthrough_id = $1
+           ORDER BY id DESC LIMIT $2
+         )`,
+      [id, SNAPSHOT_CAP],
+    )
   }
 
   async getLastSnapshot(id: string): Promise<WikiMap | null> {

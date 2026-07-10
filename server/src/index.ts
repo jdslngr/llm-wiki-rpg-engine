@@ -28,6 +28,12 @@ const store = await createStore()
 // Load any AI-authored chapters from the store into the registry so they're playable.
 const loadedChapters = await loadAuthoredChapters(store)
 if (loadedChapters) console.log(`[chapters] loaded ${loadedChapters} authored chapter(s)`)
+
+// Purge expired sessions at boot and hourly. .unref() so the interval never
+// keeps the process alive on its own.
+setInterval(() => store.deleteExpiredSessions().catch(() => {}), 1000 * 60 * 60).unref()
+store.deleteExpiredSessions().catch(() => {})
+
 // Admin list set via ADMIN_USERNAMES env var (comma-separated).
 
 const app = express()
