@@ -81,6 +81,7 @@ class MemStore implements PlaythroughStore {
   private users = new Map<string, User>()
   private sessions = new Map<string, Session>()
   private chapterSpecs = new Map<number, ChapterSpecRow>()
+  private updatedAts = new Map<string, Date>()
 
   // -- Playthroughs --
 
@@ -88,6 +89,7 @@ class MemStore implements PlaythroughStore {
     const row: Playthrough = { id: randomUUID(), character, wiki, history, userId }
     this.rows.set(row.id, structuredClone(row))
     this.history.set(row.id, [])
+    this.updatedAts.set(row.id, new Date())
     return row
   }
   async get(id: string): Promise<Playthrough | null> {
@@ -99,6 +101,7 @@ class MemStore implements PlaythroughStore {
     if (!row) return
     row.wiki = structuredClone(wiki)
     row.history = structuredClone(history)
+    this.updatedAts.set(id, new Date())
   }
   async snapshot(id: string, wiki: WikiMap): Promise<void> {
     const list = this.history.get(id) ?? []
@@ -125,7 +128,7 @@ class MemStore implements PlaythroughStore {
         character: row.character,
         chapterNumber,
         anchorTitle,
-        updatedAt: new Date().toISOString(), // memory store has no timestamps
+        updatedAt: (this.updatedAts.get(row.id) ?? new Date()).toISOString(),
         turnCount: row.history.length,
       })
     }

@@ -9,6 +9,7 @@
 import type { WikiMap, WikiUpdate, FactAddition } from './types.js'
 import type { Fold } from './chapters/types.js'
 import { getChapter, CHAPTER_END } from './chapters/index.js'
+import { ENDSTATE_FIELD_PREFIX } from './chapters/defineChapter.js'
 
 // The anti-soft-lock threshold is now per-chapter (Chapter.softLockThreshold). The
 // constant lives in chapter1.ts (5 turns) and authored chapters pick their own via
@@ -22,11 +23,39 @@ const MAX_FACTS_PER_FILE = 8
 const MAX_FACT_WORDS = 30
 const MAX_FACT_CHARS = 220 // backstop for the word-count check's blind spot (see §3.1)
 
+const MAX_WIKI_UPDATE_STRING_CHARS = 500
+const MAX_WIKI_UPDATE_ARRAY_ITEMS = 20
+
+/** Accept only string | finite number | boolean | small string[]; cap strings;
+ *  anything else (objects, null, oversized/mixed arrays) → undefined = drop. */
+function sanitizeWikiUpdateValue(v: unknown): unknown {
+  if (typeof v === 'string') return v.slice(0, MAX_WIKI_UPDATE_STRING_CHARS)
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (typeof v === 'boolean') return v
+  if (Array.isArray(v)) {
+    if (v.length > MAX_WIKI_UPDATE_ARRAY_ITEMS) return undefined
+    if (!v.every((x) => typeof x === 'string')) return undefined
+    return v
+  }
+  return undefined
+}
+
 // recap.md is never rendered into the prompt at all (renderWiki skips it); chapter-log.md
 // gets its `frontmatter` unconditionally reset to {} on every chapter transition
 // (consolidate.ts's appendChapterLog ~L58-61) — any facts stored there would be silently
 // wiped at the next chapter boundary. Both are pointless or unsafe targets — refuse upfront.
 const FACTS_EXCLUDED_FILES = new Set(['recap.md', 'chapter-log.md'])
+
+/** Normalize for dedup comparison ONLY — facts are stored verbatim. */
+function normalizeForDedup(s: string): string {
+  return s.toLowerCase().replace(/[^\p{L}\p{N}\s]/gu, '').replace(/\s+/g, ' ').trim()
+}
+
+// world-state fields the AI may never write via wiki_updates, on top of the
+// chapter's own engine-owned set: engine transition state, plus durable
+// cross-chapter facts (chapter 1's vow_made; all chapterend_* end-state fields).
+// If a future chapter adds its own out-of-band durable field, list it here.
+const ALWAYS_REFUSED_WORLD_STATE_FIELDS = new Set(['pending_transition', 'vow_made'])
 
 /** Fold reported events into world-state condition fields (deterministic, dedup'd). */
 function foldEvents(
@@ -67,13 +96,18 @@ function applyWikiUpdates(
     if (!u || typeof u.file !== 'string' || typeof u.field !== 'string') continue
     // The engine owns world-state's progress fields — the AI may not write them.
     if (u.file === 'world-state.md' && engineOwnedFields.has(u.field)) continue
+    if (
+      u.file === 'world-state.md' &&
+      (ALWAYS_REFUSED_WORLD_STATE_FIELDS.has(u.field) || u.field.startsWith(ENDSTATE_FIELD_PREFIX))
+    ) continue
     // `facts` is owned by applyFactAdditions' append-only path — a scalar write
     // through wiki_updates here would silently wipe the array.
     if (u.field === 'facts') continue
     // Don't let the AI invent files; only edit ones that already exist.
     const file = next[u.file]
     if (!file) continue
-    let value = u.value
+    let value = sanitizeWikiUpdateValue(u.value)
+    if (value === undefined) continue
     // Range-clamp known numeric fields (trust_score: 0–100).
     if (u.field === 'trust_score' && typeof value === 'number') {
       value = Math.max(0, Math.min(100, value))
@@ -101,7 +135,8 @@ function applyFactAdditions(wiki: WikiMap, additions: FactAddition[]): WikiMap {
     const file = next[a.file]
     if (!file) continue
     const cur = asArray(file.frontmatter?.facts) as string[]
-    if (cur.includes(text)) continue
+    const normalized = normalizeForDedup(text)
+    if (cur.some((f) => normalizeForDedup(f) === normalized)) continue
     file.frontmatter = { ...(file.frontmatter ?? {}), facts: [...cur, text].slice(-MAX_FACTS_PER_FILE) }
   }
   return next

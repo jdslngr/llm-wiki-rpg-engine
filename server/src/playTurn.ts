@@ -251,6 +251,13 @@ export type FinalStructured = {
   fact_additions: FactAddition[]
 }
 
+// Last-resort suggestions when the model returns none and no previous turn exists.
+const GENERIC_FALLBACK_ACTIONS = [
+  'Look around and take in your surroundings.',
+  'Talk to someone nearby.',
+  'Consider your next move carefully.',
+]
+
 // Defensively coerce the final (possibly schema-loose) object into clean fields:
 // at most 4 actions, events filtered to this character's allowed set, well-formed
 // wiki_updates only. Avoids a late validation throw killing the turn.
@@ -259,13 +266,20 @@ export function finalizeStructured(
   ch: Chapter,
   anchor: string,
   obj: unknown,
+  previousActions?: string[],
 ): FinalStructured {
   const o = (obj ?? {}) as Record<string, unknown>
   const allowed = new Set(ch.allowedEvents(crewIdOf(character), anchor))
 
-  const suggested_actions = Array.isArray(o.suggested_actions)
+  const rawActions = Array.isArray(o.suggested_actions)
     ? (o.suggested_actions.filter((s) => typeof s === 'string') as string[]).slice(0, 4)
     : []
+  // The schema asks for 3–4 in prose only; if the model returned zero, fall back to
+  // the previous turn's actions (still in world-state until this turn overwrites
+  // them), or a generic set on turn 1.
+  const suggested_actions = rawActions.length > 0
+    ? rawActions
+    : (previousActions?.length ? previousActions.slice(0, 4) : GENERIC_FALLBACK_ACTIONS)
   const events = Array.isArray(o.events)
     ? (o.events.filter((e) => typeof e === 'string' && allowed.has(e)) as string[])
     : []

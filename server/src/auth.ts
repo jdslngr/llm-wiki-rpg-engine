@@ -15,6 +15,7 @@ export const SID_COOKIE_OPTS = {
   sameSite: 'lax' as const,
   maxAge: 1000 * 60 * 60 * 24 * 7, // 7 days
   path: '/',
+  secure: process.env.COOKIE_SECURE === 'true',
 }
 
 export async function hashPassword(password: string): Promise<string> {

@@ -57,6 +57,7 @@ const COOKIE_OPTS = {
   sameSite: 'lax' as const,
   maxAge: 1000 * 60 * 60 * 24 * 365, // 1 year
   path: '/',
+  secure: process.env.COOKIE_SECURE === 'true',
 }
 
 // --- helpers ---------------------------------------------------------------
@@ -124,9 +125,37 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, store: store.kind })
 })
 
+// Simple in-memory per-IP rate limiter for the two public auth endpoints.
+const authAttempts = new Map<string, { count: number; windowStart: number }>()
+const AUTH_RATE_LIMIT = 10 // attempts
+const AUTH_RATE_WINDOW_MS = 15 * 60 * 1000
+
+function authRateLimit(req: express.Request, res: express.Response, next: express.NextFunction) {
+  const ip = req.ip ?? req.socket.remoteAddress ?? 'unknown'
+  const now = Date.now()
+  const entry = authAttempts.get(ip)
+  if (entry && now - entry.windowStart < AUTH_RATE_WINDOW_MS) {
+    if (entry.count >= AUTH_RATE_LIMIT) {
+      res.status(429).json({ error: 'Too many attempts. Please wait 15 minutes and try again.' })
+      return
+    }
+    entry.count++
+  } else {
+    authAttempts.set(ip, { count: 1, windowStart: now })
+  }
+  next()
+}
+// Sweep stale entries so the map can't grow forever.
+setInterval(() => {
+  const cutoff = Date.now() - AUTH_RATE_WINDOW_MS
+  for (const [ip, entry] of authAttempts) {
+    if (entry.windowStart < cutoff) authAttempts.delete(ip)
+  }
+}, AUTH_RATE_WINDOW_MS).unref()
+
 // --- Auth routes (public — create account / log in) ------------------------
 
-app.post('/api/auth/signup', async (req, res) => {
+app.post('/api/auth/signup', authRateLimit, async (req, res) => {
   const username = String(req.body?.username ?? '').trim()
   const password = String(req.body?.password ?? '')
 
@@ -153,7 +182,7 @@ app.post('/api/auth/signup', async (req, res) => {
   }
 })
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', authRateLimit, async (req, res) => {
   const username = String(req.body?.username ?? '').trim()
   const password = String(req.body?.password ?? '')
 
@@ -649,7 +678,13 @@ app.post('/api/play-turn', async (req, res) => {
           : new Error('The model returned an empty turn.')
       }
 
-      const structured = finalizeStructured(pt.character, getChapter(chapterNumOf(pt.wiki)), priorAnchor, last)
+      const structured = finalizeStructured(
+        pt.character,
+        getChapter(chapterNumOf(pt.wiki)),
+        priorAnchor,
+        last,
+        lastActionsOf(pt.wiki),
+      )
 
       // Code-gated write-back: validate/clamp/fold events, advance the anchor if its
       // conditions are now met, update the soft-lock counter.
@@ -797,9 +832,14 @@ app.delete('/api/admin/chapters/:n', requireAdmin(store), async (req, res) => {
     res.status(409).json({ error: 'Built-in chapters cannot be deleted.' })
     return
   }
-  await store.deleteChapterSpec(n)
-  unregisterChapter(n)
-  res.json({ ok: true })
+  try {
+    await store.deleteChapterSpec(n)
+    unregisterChapter(n)
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('[/api/admin/chapters/:n] error:', err)
+    res.status(500).json({ error: 'Could not delete the chapter.' })
+  }
 })
 
 // Diagnostics — one prompt to the operator's LLM. Was the Phase 0 public /api/ping;
