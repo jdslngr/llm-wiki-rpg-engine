@@ -69,6 +69,7 @@ export default function AuthoringScreen({ onBack }: Props) {
   // Draft (stage 2).
   const [spec, setSpec] = useState<ChapterSpec | null>(null)
   const [problems, setProblems] = useState<string[]>([])
+  const [warnings, setWarnings] = useState<string[]>([])
 
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -142,6 +143,7 @@ export default function AuthoringScreen({ onBack }: Props) {
     setBusy(true)
     setError('')
     setProblems([])
+    setWarnings([])
     try {
       const res = await fetch('/api/admin/save-chapter', {
         method: 'POST',
@@ -153,6 +155,7 @@ export default function AuthoringScreen({ onBack }: Props) {
         if (Array.isArray(data.problems)) setProblems(data.problems)
         throw new Error(data.error ?? 'Could not save the chapter.')
       }
+      setWarnings(Array.isArray(data.warnings) ? data.warnings : [])
       setSavedMsg(`Chapter ${data.number} — “${data.title}” — is live.`)
       await loadList()
     } catch (err) {
@@ -178,6 +181,7 @@ export default function AuthoringScreen({ onBack }: Props) {
       setOpeningHint('')
       setNotes('')
       setProblems([])
+      setWarnings([])
       setSavedMsg('')
       setStage('review')
     } catch (err) {
@@ -202,6 +206,7 @@ export default function AuthoringScreen({ onBack }: Props) {
   function startNew() {
     setSpec(null)
     setProblems([])
+    setWarnings([])
     setSavedMsg('')
     setError('')
     setTitle('')
@@ -259,6 +264,12 @@ export default function AuthoringScreen({ onBack }: Props) {
           <div className="mb-4 border border-red-400/40 bg-red-400/10 p-3 text-sm text-red-400 rounded-sm">
             <p className="mb-1 font-semibold">Fix these before saving:</p>
             <ul className="list-disc pl-5">{problems.map((p, i) => <li key={i}>{p}</li>)}</ul>
+          </div>
+        )}
+        {warnings.length > 0 && (
+          <div className="mb-4 border border-amber-400/40 bg-amber-400/10 p-3 text-sm text-amber-400 rounded-sm">
+            <p className="mb-1 font-medium">Saved, with warnings:</p>
+            <ul className="list-disc pl-5">{warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
           </div>
         )}
 

@@ -18,7 +18,11 @@ import { buildRecapFacts, generateRecapProse } from './recap.js'
 import { CHARACTERS, isPlayableId, buildStarterWiki, type PlayableId } from './game/characters.js'
 import { openingFor } from './game/openings.js'
 import { hashPassword, verifyPassword, validateUsername, validatePassword, requireAuth, requireAdmin, isAdminUsername, SID_COOKIE, SID_COOKIE_OPTS } from './auth.js'
-import { validateChapterSpec, gatherEndStateOps } from './chapters/defineChapter.js'
+import {
+  validateChapterSpec,
+  gatherEndStateOps,
+  chapterSpecWarnings,
+} from './chapters/defineChapter.js'
 import { expandChapterSpec, type ChapterBrief } from './expandChapter.js'
 import type { Turn, WikiMap, UserSettingsUpdate } from './types.js'
 
@@ -757,7 +761,15 @@ app.post('/api/admin/save-chapter', requireAdmin(store), async (req, res) => {
   try {
     await store.upsertChapterSpec(spec.number, spec, req.userId!)
     registerSpec(spec) // live immediately
-    res.json({ ok: true, number: spec.number, title: spec.title })
+    // Non-blocking authoring warnings: reused-flag gates (6.1) + chapter-number gaps.
+    const warnings = chapterSpecWarnings(spec)
+    if (spec.number > 1 && !hasChapter(spec.number - 1)) {
+      warnings.push(
+        `Chapter ${spec.number - 1} doesn't exist yet — Chapter ${spec.number} can't be ` +
+        `reached in play until it does (progression only ever looks for current + 1).`,
+      )
+    }
+    res.json({ ok: true, number: spec.number, title: spec.title, ...(warnings.length ? { warnings } : {}) })
   } catch (err) {
     console.error('[/api/admin/save-chapter] error:', err)
     res.status(500).json({ error: 'Could not save the chapter.' })

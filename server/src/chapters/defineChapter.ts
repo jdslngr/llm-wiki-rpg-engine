@@ -229,6 +229,18 @@ export function validateChapterSpec(
     else flagFields.add(e.fold.field)
   }
 
+  // chapterend_ fields fed by an `append` op (this spec's own endState, or another
+  // already-saved chapter's, passed in via existingEndState) are real arrays — a
+  // count_gte on them is legitimate.
+  const appendedEndStateFields = new Set<string>()
+  for (const raw of asArray(s.endState)) {
+    const op = raw as EndStateOp
+    if (op?.op === 'append' && op?.field) appendedEndStateFields.add(op.field)
+  }
+  for (const [field, op] of Object.entries(existingEndState ?? {})) {
+    if (op === 'append') appendedEndStateFields.add(field)
+  }
+
   // Validate endState ops (if present).
   for (const raw of asArray(s.endState)) {
     const op = raw as EndStateOp
@@ -270,7 +282,7 @@ export function validateChapterSpec(
           `Anchor "${a.id}" checks "${c.field}", but no event ever sets it — that beat would soft-lock.`,
         )
       }
-      if (c.op === 'count_gte' && !arrayFields.has(c.field)) {
+      if (c.op === 'count_gte' && !arrayFields.has(c.field) && !appendedEndStateFields.has(c.field)) {
         problems.push(`Anchor "${a.id}" uses count_gte on "${c.field}", which is not an array (token) field.`)
       }
       if (c.op === 'flag' && arrayFields.has(c.field) && !flagFields.has(c.field)) {
@@ -292,6 +304,51 @@ export function validateChapterSpec(
   }
 
   return problems
+}
+
+/**
+ * Non-blocking authoring warnings (returned alongside — never instead of — the
+ * blocking problems from validateChapterSpec). Currently one check: a `flag`
+ * condition on an anchor is pre-satisfied if every event feeding its field belongs
+ * to a strictly EARLIER anchor — scratch flags persist all chapter, so the gate is
+ * an illusion (the upstream chapter2.ts `interacted_with_crew` bug).
+ */
+export function chapterSpecWarnings(spec: unknown): string[] {
+  const warnings: string[] = []
+  const s = spec as Partial<ChapterSpec>
+  if (!Array.isArray(s?.anchors) || !Array.isArray(s?.events)) return warnings
+
+  const anchorIndex = new Map<string, number>()
+  s.anchors.forEach((a, i) => { if (a?.id) anchorIndex.set(a.id, i) })
+
+  // field → indexes of the anchors whose events feed it
+  const feedingAnchors = new Map<string, number[]>()
+  for (const e of s.events) {
+    if (!e?.fold?.field || !anchorIndex.has(e.anchor)) continue
+    const list = feedingAnchors.get(e.fold.field) ?? []
+    list.push(anchorIndex.get(e.anchor)!)
+    feedingAnchors.set(e.fold.field, list)
+  }
+
+  for (const a of s.anchors) {
+    if (!a?.id || !Array.isArray(a.advanceWhen)) continue
+    const ai = anchorIndex.get(a.id)
+    if (ai === undefined) continue
+    for (const c of a.advanceWhen) {
+      if (c?.op !== 'flag' || !c.field) continue
+      const feeders = feedingAnchors.get(c.field)
+      if (!feeders || feeders.length === 0) continue // "never set" is already a blocking problem
+      if (feeders.every((fi) => fi < ai)) {
+        warnings.push(
+          `Anchor "${a.id}" gates on flag "${c.field}", but every event that sets it ` +
+          `belongs to an earlier anchor — by the time "${a.id}" is active the flag is ` +
+          `almost certainly already true, so this condition adds no real gate. ` +
+          `Give this beat its own event/field if a real gate was intended.`,
+        )
+      }
+    }
+  }
+  return warnings
 }
 
 export function gatherEndStateOps(
