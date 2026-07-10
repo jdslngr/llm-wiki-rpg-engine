@@ -342,14 +342,50 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
       // (AbortError) gets its own line so a slow turn reads differently from a
       // hard failure.
       console.error('[play-turn]', err)
-      const timedOut = err instanceof DOMException && err.name === 'AbortError'
-      setError(
-        timedOut
-          ? 'The storyteller took too long to respond. Your words are safe — try again.'
-          : 'The storyteller stumbled. Your words are safe — try again.',
-      )
-      setInput(playerInput) // restore the player's text so they can retry
-      setFailedInput(playerInput)
+
+      // Resync first: the server may have committed the turn even though our
+      // fetch died (network drop mid-stream, parse error). If it did, adopt the
+      // server's state instead of offering a "Try again" that would double-commit.
+      let committed = false
+      try {
+        const res = await fetch('/api/state')
+        if (res.ok) {
+          const fresh: GameState = await res.json()
+          // A committed turn appends exactly [player, ai]: check positionally that
+          // the entry at index priorHistory.length is OUR player input.
+          const at = fresh.history[priorHistory.length]
+          if (
+            fresh.history.length >= priorHistory.length + 2 &&
+            at?.role === 'player' &&
+            at?.content === playerInput
+          ) {
+            committed = true
+            setHistory(fresh.history)
+            setActions(fresh.actions)
+            setAnchor(fresh.anchor)
+            setChapterNumber(fresh.chapterNumber)
+            setChapterTitle(fresh.chapterTitle)
+            setAnchorTitle(fresh.anchorTitle)
+            setWikiState(fresh.wikiState)
+            setSetting(fresh.setting)
+            setError('')
+            setFailedInput(null)
+          }
+        }
+      } catch {
+        // Resync itself failed — fall through to the normal error path.
+      }
+
+      if (!committed) {
+        const timedOut = err instanceof DOMException && err.name === 'AbortError'
+        setError(
+          timedOut
+            ? 'The storyteller took too long to respond. Your words are safe — try again.'
+            : 'The storyteller stumbled. Your words are safe — try again.',
+        )
+        setInput(playerInput) // restore the player's text so they can retry
+        setFailedInput(playerInput)
+      }
     } finally {
       clearTimeout(timeout)
       setLoading(false)

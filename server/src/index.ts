@@ -34,6 +34,11 @@ if (loadedChapters) console.log(`[chapters] loaded ${loadedChapters} authored ch
 setInterval(() => store.deleteExpiredSessions().catch(() => {}), 1000 * 60 * 60).unref()
 store.deleteExpiredSessions().catch(() => {})
 
+// Per-playthrough turn lock: one /api/play-turn in flight per playthrough.
+// In-memory Set is correct for this single-process server; replace with a DB
+// advisory lock if this ever runs multi-instance.
+const turnsInFlight = new Set<string>()
+
 // Admin list set via ADMIN_USERNAMES env var (comma-separated).
 
 const app = express()
@@ -578,110 +583,120 @@ app.post('/api/play-turn', async (req, res) => {
     res.status(409).json({ error: 'No active game — start a new one.' })
     return
   }
-  pt.wiki = migrateWiki(pt.wiki) // seed any fields a new chapter/version added
 
-  // Phase 5: resolve credentials. BYOK users bring their own key; hosted users
-  // use the operator's defaults (credits decremented below, but NOT YET ENFORCED).
-  const user = await store.getUserById(req.userId!)
-  const llm = resolveUserLlm(user)
-
-  res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8')
-  res.setHeader('Cache-Control', 'no-cache')
-  res.flushHeaders()
-
+  if (turnsInFlight.has(pt.id)) {
+    res.status(409).json({ error: 'A turn is already in progress for this playthrough.' })
+    return
+  }
+  turnsInFlight.add(pt.id)
   try {
-    const request: PlayTurnRequest = {
-      character: pt.character,
-      wiki: pt.wiki,
-      history: pt.history,
-      playerInput,
-      llm,
-    }
+    pt.wiki = migrateWiki(pt.wiki) // seed any fields a new chapter/version added
 
-    // The anchor BEFORE this turn — scopes the allowed events (no skipping ahead).
-    const priorAnchor = anchorOf(pt.wiki)
+    // Phase 5: resolve credentials. BYOK users bring their own key; hosted users
+    // use the operator's defaults (credits decremented below, but NOT YET ENFORCED).
+    const user = await store.getUserById(req.userId!)
+    const llm = resolveUserLlm(user)
 
-    // Capture the AI SDK's error channel (provider/transport failures arrive here,
-    // not by throwing from the stream below).
-    let streamError: unknown = null
-    const result = streamPlayTurn(request, (e) => { streamError = e })
-    // The final-object promise is unused (we coerce from partials); observe its
-    // rejection so a failed turn doesn't surface as an unhandled rejection.
-    void Promise.resolve(result.object).catch(() => {})
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.flushHeaders()
 
-    let last: Record<string, unknown> = {}
-    for await (const partial of result.partialObjectStream) {
-      last = partial as Record<string, unknown>
-      if (typeof last.narrative === 'string') {
-        res.write(JSON.stringify({ type: 'narrative', text: last.narrative }) + '\n')
+    try {
+      const request: PlayTurnRequest = {
+        character: pt.character,
+        wiki: pt.wiki,
+        history: pt.history,
+        playerInput,
+        llm,
+      }
+
+      // The anchor BEFORE this turn — scopes the allowed events (no skipping ahead).
+      const priorAnchor = anchorOf(pt.wiki)
+
+      // Capture the AI SDK's error channel (provider/transport failures arrive here,
+      // not by throwing from the stream below).
+      let streamError: unknown = null
+      const result = streamPlayTurn(request, (e) => { streamError = e })
+      // The final-object promise is unused (we coerce from partials); observe its
+      // rejection so a failed turn doesn't surface as an unhandled rejection.
+      void Promise.resolve(result.object).catch(() => {})
+
+      let last: Record<string, unknown> = {}
+      for await (const partial of result.partialObjectStream) {
+        last = partial as Record<string, unknown>
+        if (typeof last.narrative === 'string') {
+          res.write(JSON.stringify({ type: 'narrative', text: last.narrative }) + '\n')
+        }
+      }
+
+      const narrative = typeof last.narrative === 'string' ? last.narrative : ''
+      // A failed generation (bad key, timeout, provider error) ends the stream with
+      // no narrative. Surface it as an error instead of committing a blank turn.
+      if (!narrative.trim()) {
+        throw streamError instanceof Error
+          ? streamError
+          : new Error('The model returned an empty turn.')
+      }
+
+      const structured = finalizeStructured(pt.character, getChapter(chapterNumOf(pt.wiki)), priorAnchor, last)
+
+      // Code-gated write-back: validate/clamp/fold events, advance the anchor if its
+      // conditions are now met, update the soft-lock counter.
+      const turn = runWriteBack(pt.wiki, structured.events, structured.wiki_updates, structured.fact_additions)
+      turn.wiki['world-state.md'].frontmatter!.last_actions = structured.suggested_actions
+
+      const history: Turn[] = [
+        ...pt.history,
+        { role: 'player', content: playerInput },
+        { role: 'ai', content: narrative },
+      ]
+      // Snapshot the PRE-turn wiki (pt.wiki is untouched — runWriteBack returns a new
+      // wiki), tied to this committed turn so rollback maps 1:1 to turns. Snapshotting
+      // here (not before the AI call) means a failed turn leaves no orphan snapshot.
+      await store.snapshot(pt.id, pt.wiki)
+      await store.save(pt.id, turn.wiki, history)
+
+      // Phase 5: decrement hosted credits atomically (metering built, NOT YET ENFORCED).
+      // When enforced, add a check BEFORE the turn: if credits <= 0, reject with a
+      // friendly nudge to add a BYO key.
+      if (user && user.keyMode === 'hosted') {
+        try { await store.decrementHostedCredits(user.id) } catch { /* best-effort */ }
+      }
+
+      res.write(
+        JSON.stringify({
+          type: 'done',
+          narrative,
+          suggested_actions: structured.suggested_actions,
+          events: structured.events,
+          wiki_updates: structured.wiki_updates,
+          fact_additions: structured.fact_additions,
+          anchor: turn.toAnchor,
+          fromAnchor: turn.fromAnchor,
+          advanced: turn.advanced,
+          ...chapterMetaOf(turn.wiki),
+          wikiState: wikiStateOf(turn.wiki),
+          setting: settingBody(turn.wiki),
+        }) + '\n',
+      )
+      res.end()
+
+      if (process.env.LOG_TOKEN_USAGE === 'true') {
+        result.usage
+          .then((u) => console.log('[play-turn] usage:', JSON.stringify(u)))
+          .catch(() => {})
+      }
+    } catch (err) {
+      // Log the real error for debugging; show the player a warm, generic message.
+      console.error('[/api/play-turn] error:', err)
+      if (!res.headersSent) res.status(503).json({ error: FRIENDLY_TURN_ERROR })
+      else {
+        res.write(JSON.stringify({ type: 'error', error: FRIENDLY_TURN_ERROR }) + '\n')
+        res.end()
       }
     }
-
-    const narrative = typeof last.narrative === 'string' ? last.narrative : ''
-    // A failed generation (bad key, timeout, provider error) ends the stream with
-    // no narrative. Surface it as an error instead of committing a blank turn.
-    if (!narrative.trim()) {
-      throw streamError instanceof Error
-        ? streamError
-        : new Error('The model returned an empty turn.')
-    }
-
-    const structured = finalizeStructured(pt.character, getChapter(chapterNumOf(pt.wiki)), priorAnchor, last)
-
-    // Code-gated write-back: validate/clamp/fold events, advance the anchor if its
-    // conditions are now met, update the soft-lock counter.
-    const turn = runWriteBack(pt.wiki, structured.events, structured.wiki_updates, structured.fact_additions)
-    turn.wiki['world-state.md'].frontmatter!.last_actions = structured.suggested_actions
-
-    const history: Turn[] = [
-      ...pt.history,
-      { role: 'player', content: playerInput },
-      { role: 'ai', content: narrative },
-    ]
-    // Snapshot the PRE-turn wiki (pt.wiki is untouched — runWriteBack returns a new
-    // wiki), tied to this committed turn so rollback maps 1:1 to turns. Snapshotting
-    // here (not before the AI call) means a failed turn leaves no orphan snapshot.
-    await store.snapshot(pt.id, pt.wiki)
-    await store.save(pt.id, turn.wiki, history)
-
-    // Phase 5: decrement hosted credits atomically (metering built, NOT YET ENFORCED).
-    // When enforced, add a check BEFORE the turn: if credits <= 0, reject with a
-    // friendly nudge to add a BYO key.
-    if (user && user.keyMode === 'hosted') {
-      try { await store.decrementHostedCredits(user.id) } catch { /* best-effort */ }
-    }
-
-    res.write(
-      JSON.stringify({
-        type: 'done',
-        narrative,
-        suggested_actions: structured.suggested_actions,
-        events: structured.events,
-        wiki_updates: structured.wiki_updates,
-        fact_additions: structured.fact_additions,
-        anchor: turn.toAnchor,
-        fromAnchor: turn.fromAnchor,
-        advanced: turn.advanced,
-        ...chapterMetaOf(turn.wiki),
-        wikiState: wikiStateOf(turn.wiki),
-        setting: settingBody(turn.wiki),
-      }) + '\n',
-    )
-    res.end()
-
-    if (process.env.LOG_TOKEN_USAGE === 'true') {
-      result.usage
-        .then((u) => console.log('[play-turn] usage:', JSON.stringify(u)))
-        .catch(() => {})
-    }
-  } catch (err) {
-    // Log the real error for debugging; show the player a warm, generic message.
-    console.error('[/api/play-turn] error:', err)
-    if (!res.headersSent) res.status(503).json({ error: FRIENDLY_TURN_ERROR })
-    else {
-      res.write(JSON.stringify({ type: 'error', error: FRIENDLY_TURN_ERROR }) + '\n')
-      res.end()
-    }
+  } finally {
+    turnsInFlight.delete(pt.id)
   }
 })
 
