@@ -360,6 +360,16 @@ class PgStore implements PlaythroughStore {
           [id, name, JSON.stringify(file.frontmatter ?? {}), file.body ?? ''],
         )
       }
+      // Delete rows no longer in the wiki map (e.g. recap.md dropped by consolidate).
+      // Guarded on a non-empty key list so a stray empty-wiki save can never wipe
+      // every row for a playthrough.
+      const names = Object.keys(wiki)
+      if (names.length > 0) {
+        await client.query(
+          'DELETE FROM wiki_files WHERE playthrough_id = $1 AND name <> ALL($2::text[])',
+          [id, names],
+        )
+      }
       await client.query('COMMIT')
     } catch (err) {
       await client.query('ROLLBACK')
