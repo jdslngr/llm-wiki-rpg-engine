@@ -57,11 +57,18 @@ const COOKIE_OPTS = {
 
 // --- helpers ---------------------------------------------------------------
 
-function dossierFor(character: string, displayName?: string) {
+function dossierFor(character: string, wiki?: WikiMap) {
   const c = CHARACTERS[character as PlayableId] ?? CHARACTERS.kaspen
-  const name = displayName?.trim() || c.name
-  const povLabel = displayName?.trim()
-    ? `a modern human named ${displayName.trim()}, transported into 100,000 BCE, to whom this world is utterly new`
+  // The player-chosen display name lives in player-character.md frontmatter (seeded
+  // by buildStarterWiki). Only treat it as a custom name when it differs from the
+  // character's default — for non-Visitor characters the stored name IS the default
+  // (e.g. "Kaspen"), and they must NOT get the "modern human named X" POV label.
+  const stored = wiki?.['player-character.md']?.frontmatter?.name
+  const storedName = typeof stored === 'string' ? stored.trim() : ''
+  const displayName = storedName && storedName !== c.name ? storedName : undefined
+  const name = displayName || c.name
+  const povLabel = displayName
+    ? `a modern human named ${displayName}, transported into 100,000 BCE, to whom this world is utterly new`
     : c.povLabel
   return { id: c.id, name, role: c.role, knowsLabel: c.knowsLabel, dossier: c.dossier, povLabel }
 }
@@ -342,7 +349,7 @@ app.post('/api/saves/:id/resume', async (req, res) => {
     pt.wiki = migrateWiki(pt.wiki) // seed any fields a new chapter/version added
     res.cookie(PID_COOKIE, pt.id, COOKIE_OPTS)
     res.json({
-      character: dossierFor(pt.character),
+      character: dossierFor(pt.character, pt.wiki),
       anchor: anchorOf(pt.wiki),
       ...chapterMetaOf(pt.wiki),
       history: pt.history,
@@ -376,7 +383,7 @@ app.post('/api/new-game', async (req, res) => {
     const pt = await store.create(character, wiki, history, req.userId!)
     res.cookie(PID_COOKIE, pt.id, COOKIE_OPTS)
     res.json({
-      character: dossierFor(character, visitorName || undefined),
+      character: dossierFor(character, wiki),
       anchor: anchorOf(wiki),
       ...chapterMetaOf(wiki),
       history,
@@ -416,7 +423,7 @@ app.get('/api/state', async (req, res) => {
   }
   pt.wiki = migrateWiki(pt.wiki) // seed any fields a new chapter/version added
   res.json({
-    character: dossierFor(pt.character),
+    character: dossierFor(pt.character, pt.wiki),
     anchor: anchorOf(pt.wiki),
     ...chapterMetaOf(pt.wiki),
     history: pt.history,
@@ -521,7 +528,7 @@ app.post('/api/next-chapter', async (req, res) => {
 
     await store.save(pt.id, wiki, history)
     res.json({
-      character: dossierFor(pt.character),
+      character: dossierFor(pt.character, wiki),
       anchor: anchorOf(wiki),
       ...chapterMetaOf(wiki),
       history,
@@ -555,7 +562,7 @@ app.post('/api/rollback', async (req, res) => {
   await store.save(pt.id, prev, newHistory)
   await store.dropLastSnapshot(pt.id)
   res.json({
-    character: dossierFor(pt.character),
+    character: dossierFor(pt.character, prev),
     anchor: anchorOf(prev),
     ...chapterMetaOf(prev),
     history: newHistory,
