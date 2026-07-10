@@ -8,7 +8,13 @@
 
 import { generateObject } from 'ai'
 import { z } from 'zod'
-import { getModel, buildModel } from './llm.js'
+import {
+  getModel,
+  buildModel,
+  structuredOutputProviderOptions,
+  needsSystemAsUserWorkaround,
+  JSON_MODE_REMINDER,
+} from './llm.js'
 import { getChapter } from './chapters/index.js'
 import { CHARACTERS, type PlayableId } from './game/characters.js'
 import type { WikiMap, Turn } from './types.js'
@@ -159,11 +165,20 @@ be remembered. Keep the tone cozy and a little wistful (it is a long goodbye). D
 plot that didn't happen, do NOT explain the secret beyond what the vow revealed, and do NOT
 foreshadow specific future chapters. Also give a short evocative title.`
 
+  // Direct (non-OpenRouter) providers need the same workarounds as playTurn.ts /
+  // expandChapter.ts: json_object mode instead of json_schema, the literal word
+  // "json" in the prompt, and retries (json_object isn't schema-enforced, so a
+  // model can occasionally guess wrong field names or emit malformed JSON).
+  const providerName = llm?.provider // resolveProvider handles undefined
   const { object } = await generateObject({
     model,
     schema: recapSchema,
-    prompt,
+    providerOptions: structuredOutputProviderOptions(providerName),
+    prompt: needsSystemAsUserWorkaround(providerName)
+      ? `${prompt}\n\n${JSON_MODE_REMINDER} The object has exactly two string fields: "title" and "prose".`
+      : prompt,
     maxOutputTokens: 500,
+    maxRetries: 3,
   })
   return object
 }
