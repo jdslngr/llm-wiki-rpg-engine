@@ -102,21 +102,6 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true, store: store.kind })
 })
 
-// Phase 0 throwaway endpoint — proves browser -> backend -> AI. Kept for diagnostics.
-app.post('/api/ping', async (req, res) => {
-  const prompt = String(req.body?.prompt ?? '').trim()
-  if (!prompt) {
-    res.status(400).json({ error: 'Missing "prompt".' })
-    return
-  }
-  try {
-    res.json({ reply: await askLLM(prompt) })
-  } catch (err) {
-    console.error('[/api/ping] error:', err)
-    res.status(500).json({ error: err instanceof Error ? err.message : 'AI request failed' })
-  }
-})
-
 // --- Auth routes (public — create account / log in) ------------------------
 
 app.post('/api/auth/signup', async (req, res) => {
@@ -775,6 +760,22 @@ app.delete('/api/admin/chapters/:n', requireAdmin(store), async (req, res) => {
   await store.deleteChapterSpec(n)
   unregisterChapter(n)
   res.json({ ok: true })
+})
+
+// Diagnostics — one prompt to the operator's LLM. Was the Phase 0 public /api/ping;
+// moved behind the auth wall + admin gate so strangers can't burn credits.
+app.post('/api/admin/ping', requireAdmin(store), async (req, res) => {
+  const prompt = String(req.body?.prompt ?? '').trim()
+  if (!prompt) {
+    res.status(400).json({ error: 'Missing "prompt".' })
+    return
+  }
+  try {
+    res.json({ reply: await askLLM(prompt) })
+  } catch (err) {
+    console.error('[/api/admin/ping] error:', err)
+    res.status(500).json({ error: err instanceof Error ? err.message : 'AI request failed' })
+  }
 })
 
 // --- Serve the built frontend (production) ---------------------------------
