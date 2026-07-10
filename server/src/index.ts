@@ -778,22 +778,22 @@ app.post('/api/admin/expand-chapter', requireAdmin(store), async (req, res) => {
 // through the old shape (e.g. on an anchor id the new spec removed). Avoid editing a
 // chapter that has active players; this is a v1 trade-off, not a bug.
 app.post('/api/admin/save-chapter', requireAdmin(store), async (req, res) => {
-  const spec = req.body?.spec
-  const rows = await store.listChapterSpecs()
-  const existingEndState = gatherEndStateOps(
-    rows.map((r) => ({ number: r.number, endState: r.spec.endState })),
-    spec?.number,
-  )
-  const problems = validateChapterSpec(spec, existingEndState)
-  if (problems.length) {
-    res.status(400).json({ error: 'The chapter has problems that must be fixed first.', problems })
-    return
-  }
-  if (spec.number === 1) {
-    res.status(409).json({ error: `Chapter ${spec.number} is built-in and can't be overwritten.` })
-    return
-  }
   try {
+    const spec = req.body?.spec
+    const rows = await store.listChapterSpecs()
+    const existingEndState = gatherEndStateOps(
+      rows.map((r) => ({ number: r.number, endState: r.spec.endState })),
+      spec?.number,
+    )
+    const problems = validateChapterSpec(spec, existingEndState)
+    if (problems.length) {
+      res.status(400).json({ error: 'The chapter has problems that must be fixed first.', problems })
+      return
+    }
+    if (spec.number === 1) {
+      res.status(409).json({ error: `Chapter ${spec.number} is built-in and can't be overwritten.` })
+      return
+    }
     await store.upsertChapterSpec(spec.number, spec, req.userId!)
     registerSpec(spec) // live immediately
     // Non-blocking authoring warnings: reused-flag gates (6.1) + chapter-number gaps.
