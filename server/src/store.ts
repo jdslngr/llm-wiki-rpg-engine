@@ -289,6 +289,12 @@ class PgStore implements PlaythroughStore {
         updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
+
+      -- Repair rows corrupted by the pre-fix "null" string bug (no-op once clean;
+      -- safe to re-run every boot, same pattern as the ALTER TABLE migrations above).
+      UPDATE users SET llm_provider = NULL WHERE llm_provider = 'null';
+      UPDATE users SET llm_model    = NULL WHERE llm_model    = 'null';
+      UPDATE users SET llm_base_url = NULL WHERE llm_base_url = 'null';
     `)
     return new PgStore(pool)
   }

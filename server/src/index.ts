@@ -69,6 +69,14 @@ function lastActionsOf(wiki: WikiMap): string[] {
   return Array.isArray(v) ? (v as string[]) : []
 }
 
+// Blank / null / whitespace → real null. Also rejects the literal string "null"
+// (the pre-fix bug stored String(null); don't let a client resend it).
+const asOptString = (v: unknown): string | null => {
+  if (typeof v !== 'string') return null
+  const t = v.trim()
+  return t && t !== 'null' ? t : null
+}
+
 // Resolve a user's AI credentials: BYOK users bring their own (decrypted) key;
 // everyone else returns undefined → the caller uses the operator defaults.
 type StoredUser = Awaited<ReturnType<typeof store.getUserById>>
@@ -244,9 +252,9 @@ app.put('/api/auth/settings', async (req, res) => {
     const updates: UserSettingsUpdate = {}
 
     if (keyMode !== undefined) updates.keyMode = keyMode
-    if (llmProvider !== undefined) updates.llmProvider = String(llmProvider).trim() || null
-    if (llmModel !== undefined) updates.llmModel = String(llmModel).trim() || null
-    if (llmBaseUrl !== undefined) updates.llmBaseUrl = String(llmBaseUrl).trim() || null
+    if (llmProvider !== undefined) updates.llmProvider = asOptString(llmProvider)
+    if (llmModel !== undefined) updates.llmModel = asOptString(llmModel)
+    if (llmBaseUrl !== undefined) updates.llmBaseUrl = asOptString(llmBaseUrl)
 
     // If switching to BYOK and a new key was pasted, validate then encrypt.
     if (keyMode === 'byok' && typeof llmKey === 'string' && llmKey.trim()) {
