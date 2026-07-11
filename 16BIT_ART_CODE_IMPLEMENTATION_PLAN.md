@@ -893,6 +893,14 @@ Files:
 - Update `docker-compose.yml`.
 - Usually no `client/vite.config.ts` change is needed.
 
+Implementation note, 2026-07-12:
+
+- Added `ART_DIR: "/app/server/data/art"` to the app service's `environment` block so the filesystem art store writes to the correct path inside the container.
+- Added `artdata:/app/server/data/art` volume mount to the app service so uploaded art persists across container rebuilds.
+- Added `artdata:` to the global `volumes` block alongside the existing `pgdata:` volume.
+- No changes needed to `client/vite.config.ts` — the existing `/api` proxy already covers `/api/art/media/:artId`.
+- Validation run for this phase: `npm run build` (client TS + Vite, server TS — clean). Docker-specific validation (Phase 8) will verify persistence across rebuilds.
+
 `client/vite.config.ts` already proxies `/api`, which covers `/api/art/media/:artId`.
 
 Update `docker-compose.yml`:
