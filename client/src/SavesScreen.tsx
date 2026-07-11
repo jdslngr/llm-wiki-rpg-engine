@@ -26,6 +26,8 @@ interface Props {
   onSettings: () => void
   onLogout: () => void
   onAuthor: () => void
+  onManageArt: () => void
+  onChapterArt: (playthroughId: string) => void
 }
 
 function timeAgo(iso: string): string {
@@ -40,7 +42,7 @@ function timeAgo(iso: string): string {
   return new Date(iso).toLocaleDateString()
 }
 
-export default function SavesScreen({ onResume, onStartNew, onSettings, onLogout, onAuthor }: Props) {
+export default function SavesScreen({ onResume, onStartNew, onSettings, onLogout, onAuthor, onManageArt, onChapterArt }: Props) {
   const [saves, setSaves] = useState<SaveEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -128,6 +130,15 @@ export default function SavesScreen({ onResume, onStartNew, onSettings, onLogout
                 ✎ Author a chapter
               </button>
             )}
+            {isAdmin && (
+              <button
+                onClick={onManageArt}
+                className="text-sm text-gold-text hover:opacity-80 transition"
+                style={fontBody}
+              >
+                🎨 Manage art
+              </button>
+            )}
             <span className="text-text-muted" style={fontBody}>·</span>
             <button
               onClick={onSettings}
@@ -179,19 +190,33 @@ export default function SavesScreen({ onResume, onStartNew, onSettings, onLogout
                     {s.turnCount} turn{s.turnCount !== 1 ? 's' : ''}
                   </p>
                 </div>
-                <button
-                  onClick={() => resume(s.id)}
-                  disabled={busyId !== null}
-                  className="shrink-0 rounded-sm px-[22px] py-2 text-[13px] font-semibold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-                  style={{
-                    background: 'linear-gradient(180deg, var(--color-gold) 0%, var(--color-gold-dark) 100%)',
-                    color: 'oklch(0.17 0.050 150)',
-                    fontFamily: "'Lora', Georgia, serif",
-                    boxShadow: '0 2px 8px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,228,110,0.25)',
-                  }}
-                >
-                  {busyId === s.id ? 'Loading…' : 'Continue'}
-                </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    onClick={() => onChapterArt(s.id)}
+                    className="rounded-sm px-3 py-2 text-[12px] font-medium transition hover:opacity-80"
+                    style={{
+                      background: 'transparent',
+                      border: '1px solid var(--color-gold-mid)',
+                      color: 'var(--color-gold-text)',
+                      fontFamily: "'Lora', Georgia, serif",
+                    }}
+                  >
+                    Chapter Art
+                  </button>
+                  <button
+                    onClick={() => resume(s.id)}
+                    disabled={busyId !== null}
+                    className="rounded-sm px-[22px] py-2 text-[13px] font-semibold transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                    style={{
+                      background: 'linear-gradient(180deg, var(--color-gold) 0%, var(--color-gold-dark) 100%)',
+                      color: 'oklch(0.17 0.050 150)',
+                      fontFamily: "'Lora', Georgia, serif",
+                      boxShadow: '0 2px 8px rgba(0,0,0,0.30), inset 0 1px 0 rgba(255,228,110,0.25)',
+                    }}
+                  >
+                    {busyId === s.id ? 'Loading…' : 'Continue'}
+                  </button>
+                </div>
               </div>
             ))}
           </div>

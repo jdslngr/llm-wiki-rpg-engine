@@ -544,6 +544,15 @@ Files:
 - Add `client/src/ArtAdminScreen.tsx`.
 - Add `client/src/ChapterArtScreen.tsx`.
 
+Implementation note, 2026-07-12:
+
+- Added `ArtAsset`, `ChapterArtResponse`, `ArtChapterOption`, and `ArtGalleryResponse` types to `client/src/types.ts`.
+- Added `playthroughId` to `GameState`.
+- Created stub `ArtAdminScreen.tsx` and `ChapterArtScreen.tsx` with back buttons — full implementations follow in Phases 4 and 5.
+- Extended `App.tsx` with `artAdmin` and `chapterArt` screen variants, `artPlaythroughId` state, and routing for both new screens.
+- Updated `SavesScreen.tsx` props with `onManageArt` and `onChapterArt`. Admins see "🎨 Manage art" in the header. Every save row has a "Chapter Art" button next to "Continue".
+- Validation run for this phase: `npm run build` (client + server TS compile, client Vite bundle pass), and `npm exec -- tsx src/verify-art-store.ts` from `server/` (all 27 verifier assertions pass).
+
 Add types:
 
 ```ts

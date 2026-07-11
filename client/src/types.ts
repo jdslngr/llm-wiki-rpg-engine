@@ -29,6 +29,7 @@ export type WikiState = Record<string, Record<string, unknown>>
 
 // What /api/new-game and /api/state return.
 export type GameState = {
+  playthroughId: string
   character: Dossier
   anchor: string
   // Human-readable labels for the header (server-provided; works across chapters).
@@ -110,4 +111,42 @@ export type DoneFrame = {
   anchorTitle: string
   wikiState: WikiState
   setting: string
+}
+
+// ── 16-bit art types ────────────────────────────────────────────────────────
+
+export type ArtAsset = {
+  id: string
+  kind: 'chapter' | 'beat'
+  chapterNumber: number
+  anchor: string | null
+  title: string
+  label: string
+  filename: string
+  url: string
+  mimeType: 'video/mp4' | 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif' | 'image/avif'
+  sizeBytes: number
+  updatedAt: string
+  updatedBy: string | null
+}
+
+export type ChapterArtResponse = {
+  chapterArt: ArtAsset | null
+  beatArt: Record<string, ArtAsset>
+}
+
+export type ArtChapterOption = {
+  number: number
+  title: string
+  anchors: { id: string; title: string }[]
+}
+
+export type ArtGalleryResponse = {
+  chapters: {
+    chapterNumber: number
+    chapterTitle: string
+    state: 'completed' | 'current'
+    chapterArt: ArtAsset | null
+    beatArts: { anchor: string; anchorTitle: string; art: ArtAsset | null }[]
+  }[]
 }

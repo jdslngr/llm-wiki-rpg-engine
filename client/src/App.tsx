@@ -8,14 +8,17 @@ import GameScreen from './GameScreen'
 import SettingsScreen from './SettingsScreen'
 import RecapScreen from './RecapScreen'
 import AuthoringScreen from './AuthoringScreen'
+import ArtAdminScreen from './ArtAdminScreen'
+import ChapterArtScreen from './ChapterArtScreen'
 
-type Screen = 'booting' | 'login' | 'signup' | 'saves' | 'select' | 'settings' | 'game' | 'recap' | 'authoring'
+type Screen = 'booting' | 'login' | 'signup' | 'saves' | 'select' | 'settings' | 'game' | 'recap' | 'authoring' | 'artAdmin' | 'chapterArt'
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('booting')
   // Tracked through login/signup/logout; not yet displayed anywhere (value unread).
   const [, setUsername] = useState<string | null>(null)
   const [gameState, setGameState] = useState<GameState | null>(null)
+  const [artPlaythroughId, setArtPlaythroughId] = useState<string | null>(null)
 
   // Boot: check auth, then check for an existing playthrough.
   useEffect(() => {
@@ -97,6 +100,15 @@ export default function App() {
     setScreen('recap')
   }
 
+  function handleManageArt() {
+    setScreen('artAdmin')
+  }
+
+  function handleChapterArt(playthroughId: string) {
+    setArtPlaythroughId(playthroughId)
+    setScreen('chapterArt')
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   if (screen === 'booting') {
@@ -116,11 +128,27 @@ export default function App() {
   }
 
   if (screen === 'saves') {
-    return <SavesScreen onResume={handleResume} onStartNew={handleGoToSelect} onSettings={handleGoToSettings} onLogout={handleLogout} onAuthor={() => setScreen('authoring')} />
+    return <SavesScreen onResume={handleResume} onStartNew={handleGoToSelect} onSettings={handleGoToSettings} onLogout={handleLogout} onAuthor={() => setScreen('authoring')} onManageArt={handleManageArt} onChapterArt={handleChapterArt} />
   }
 
   if (screen === 'authoring') {
     return <AuthoringScreen onBack={() => setScreen('saves')} />
+  }
+
+  if (screen === 'artAdmin') {
+    return <ArtAdminScreen onBack={() => setScreen('saves')} />
+  }
+
+  if (screen === 'chapterArt' && artPlaythroughId) {
+    return (
+      <ChapterArtScreen
+        playthroughId={artPlaythroughId}
+        onBack={() => {
+          setArtPlaythroughId(null)
+          setScreen('saves')
+        }}
+      />
+    )
   }
 
   if (screen === 'select') {
