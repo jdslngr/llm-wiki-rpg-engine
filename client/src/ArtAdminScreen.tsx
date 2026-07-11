@@ -171,8 +171,8 @@ export default function ArtAdminScreen({ onBack }: Props) {
     }
 
     // Client MIME check — server is authoritative
-    if (!ALLOWED_MIMES.includes(f.type as typeof ALLOWED_MIMES[number])) {
-      setError(`"${f.type || 'unknown'}" is not a supported art format. Use MP4, JPEG, PNG, WebP, GIF, or AVIF.`)
+    if (!f.type || !ALLOWED_MIMES.includes(f.type as typeof ALLOWED_MIMES[number])) {
+      setError(`"${f.type || 'unknown type'}" is not a supported art format. Use MP4, JPEG, PNG, WebP, GIF, or AVIF.`)
       setFile(null)
       if (fileInputRef.current) fileInputRef.current.value = ''
       return

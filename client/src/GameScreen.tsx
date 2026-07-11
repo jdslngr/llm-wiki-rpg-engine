@@ -69,6 +69,9 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
   useEffect(() => {
     let cancelled = false
     async function loadArt() {
+      // Clear stale art from the previous chapter before fetching new art.
+      setChapterArt(null)
+      setBeatArtByAnchor({})
       const params = new URLSearchParams({ playthroughId: initialState.playthroughId })
       try {
         const res = await fetch(`/api/art/${chapterNumber}?${params.toString()}`)
