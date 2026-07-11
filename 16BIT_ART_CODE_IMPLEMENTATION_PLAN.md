@@ -790,6 +790,17 @@ File:
 - Update `client/src/GameScreen.tsx`.
 - Optional: add `client/src/ArtLoop.tsx` if a shared renderer keeps `GameScreen` cleaner.
 
+Implementation note, 2026-07-12:
+
+- Created `client/src/ArtLoop.tsx` — a shared MIME-branching renderer that renders `<img>` for `image/*` and `<video autoPlay muted loop playsInline>` for `video/mp4`. Accepts `className` and `style` props.
+- Added `chapterArt` and `beatArtByAnchor` state to `GameScreen`, fetched from `GET /api/art/:chapterNumber?playthroughId=...` when `chapterNumber` or `playthroughId` changes. Fetch is best-effort (never blocks the game on art failure).
+- Derived `beatArt = beatArtByAnchor[anchor] ?? null` updates automatically when the anchor changes, no extra fetch needed.
+- **Desktop layout (xl+)**: Outer container widened from `max-w-6xl` to `max-w-[1440px]` with `xl:flex-row`. Left rail at `w-[220px]` for chapter art. Right rail at `w-[260px]` for beat art. Debug panel takes priority over the right beat art rail when open.
+- **Mobile inline** (`xl:hidden`): Beat art only, placed inside the transcript scroll container after the dossier and before older turns. Centered with `max-w-[260px]`.
+- All art surfaces use `aspect-[9/16]`, `object-cover`, `rounded-sm` via className. No borders, rings, outlines, framed-card wrappers, or shadow frames — art stands on its own per the bug shields.
+- Layout shift is prevented via fixed aspect ratio on all art elements.
+- Validation run for this phase: `npm run build` (client TS + Vite, server TS — 28 modules now with ArtLoop), and `npm exec -- tsx src/verify-art-store.ts` from `server/` (all 27 verifier assertions pass).
+
 Add state:
 
 ```ts

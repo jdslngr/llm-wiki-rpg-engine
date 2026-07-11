@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { Dossier, DoneFrame, GameState, Turn, WikiState, WikiUpdate } from './types'
+import type { ArtAsset, ChapterArtResponse, Dossier, DoneFrame, GameState, Turn, WikiState, WikiUpdate } from './types'
+import ArtLoop from './ArtLoop'
 
 const WORD_CAP = 300
 const VISIBLE_TURNS = 15
@@ -54,6 +55,8 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
   const [isScrolledFromTop, setIsScrolledFromTop] = useState(false)
   const [suggestionsOpen, setSuggestionsOpen] = useState(false)
   const [navMenuOpen, setNavMenuOpen] = useState(false)
+  const [chapterArt, setChapterArt] = useState<ArtAsset | null>(null)
+  const [beatArtByAnchor, setBeatArtByAnchor] = useState<Record<string, ArtAsset>>({})
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -61,6 +64,27 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
       .then((d) => setIsAdmin(!!d?.user?.isAdmin))
       .catch(() => {})
   }, [])
+
+  // Fetch chapter art and beat art for the current chapter.
+  useEffect(() => {
+    let cancelled = false
+    async function loadArt() {
+      const params = new URLSearchParams({ playthroughId: initialState.playthroughId })
+      try {
+        const res = await fetch(`/api/art/${chapterNumber}?${params.toString()}`)
+        const data: ChapterArtResponse = await res.json()
+        if (cancelled) return
+        if (res.ok) {
+          setChapterArt(data.chapterArt)
+          setBeatArtByAnchor(data.beatArt)
+        }
+      } catch {
+        /* art is best-effort; never block the game on it */
+      }
+    }
+    loadArt()
+    return () => { cancelled = true }
+  }, [chapterNumber, initialState.playthroughId])
 
   useEffect(() => {
     if (!navMenuOpen) return
@@ -214,6 +238,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
 
   const words = wordCount(input)
   const overCap = words > WORD_CAP
+  const beatArt = beatArtByAnchor[anchor] ?? null
 
   // Export the whole story so far as a Markdown file the player can keep. Built entirely
   // from the in-browser history — AI turns become prose, the player's own actions become
@@ -492,7 +517,17 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
         </div>
       </header>
 
-      <div className="mx-auto flex min-h-0 w-full max-w-6xl flex-1 flex-col gap-4 px-safe py-4 md:flex-row">
+      <div className="mx-auto flex min-h-0 w-full max-w-[1440px] flex-1 flex-col gap-4 px-safe py-4 xl:flex-row">
+        {/* Desktop left rail — chapter art */}
+        {chapterArt && (
+          <aside className="hidden xl:flex w-[220px] shrink-0 flex-col gap-2">
+            <ArtLoop art={chapterArt} className="w-full rounded-sm object-cover" style={{ aspectRatio: '9/16' }} />
+            <p className="text-[11px] text-text-muted text-center leading-tight" style={{ fontFamily: "'Lora', Georgia, serif" }}>
+              {chapterArt.label}
+            </p>
+          </aside>
+        )}
+
         {/* Story column */}
         <main className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div
@@ -580,6 +615,13 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
                   <span className="ml-auto text-[13px] text-gold-text" style={fontBody}>Expand dossier +</span>
                 </button>
               )
+            )}
+
+            {/* Mobile inline beat art — only on non-xl screens, after dossier */}
+            {beatArt && (
+              <div className="xl:hidden w-full max-w-[260px] mx-auto">
+                <ArtLoop art={beatArt} className="w-full rounded-sm object-cover" style={{ aspectRatio: '9/16' }} />
+              </div>
             )}
 
             {/* Older turns — collapsed when there are more than VISIBLE_TURNS */}
@@ -837,7 +879,17 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
           )}
         </main>
 
-        {/* Debug panel — dev or admin */}
+        {/* Desktop right rail — beat art (hidden when debug is open) */}
+        {beatArt && (!showDebug || !(import.meta.env.DEV || isAdmin)) && (
+          <aside className="hidden xl:flex w-[260px] shrink-0 flex-col gap-2">
+            <ArtLoop art={beatArt} className="w-full rounded-sm object-cover" style={{ aspectRatio: '9/16' }} />
+            <p className="text-[11px] text-text-muted text-center leading-tight" style={{ fontFamily: "'Lora', Georgia, serif" }}>
+              {beatArt.label}
+            </p>
+          </aside>
+        )}
+
+        {/* Debug panel — dev or admin (takes priority over beat art rail) */}
         {(import.meta.env.DEV || isAdmin) && showDebug && (
           <aside
             className="w-full overflow-y-auto border p-4 text-xs md:w-80 md:shrink-0"
