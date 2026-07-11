@@ -961,6 +961,13 @@ Implementation note, 2026-07-12:
     Fixed getReachedAnchors fallback — when the current wiki anchor isn't in the chapter spec
     (e.g. chapter was re-authored), returns all anchors instead of only the first, so players
     don't lose already-earned art.
+  - Second-round fixes (2026-07-12):
+    - **GameScreen:** Clear `beatArtByAnchor` and `chapterArt` before fetching new chapter art
+      so stale art from the previous chapter never flashes during transitions.
+    - **ArtAdminScreen:** Handle empty `File.type` (browsers can return `""` for unknown files)
+      before the MIME validation check so the error message reads cleanly.
+    - **ChapterArtScreen:** Add `stopPropagation` on the overlay close button so it doesn't
+      redundantly fire the backdrop's `onClick` handler too.
 - Manual browser checks (per plan acceptance criteria) should be performed by the operator
   before declaring the feature shipped. The production-style `docker compose up` check is
   covered by Phase 7; the `/api/health` endpoint should return `{"ok":true,"store":"postgres"}`.
