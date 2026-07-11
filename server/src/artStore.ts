@@ -82,9 +82,18 @@ function sortAssets(assets: ArtAsset[]): ArtAsset[] {
 
 export class ArtStore {
   readonly artDir: string
+  #writeLock: Promise<void> = Promise.resolve()
 
   constructor(artDir?: string) {
     this.artDir = artDir ?? process.env.ART_DIR ?? path.resolve(process.cwd(), 'data', 'art')
+  }
+
+  /** Serialise registry mutations so concurrent writes never lose updates. */
+  #withWriteLock<T>(fn: () => Promise<T>): Promise<T> {
+    const prev = this.#writeLock
+    let release: () => void
+    this.#writeLock = new Promise<void>((resolve) => { release = resolve })
+    return prev.then(() => fn()).finally(() => release!())
   }
 
   private get registryPath(): string {
@@ -111,7 +120,19 @@ export class ArtStore {
       const parsed = JSON.parse(raw) as ArtAsset[]
       return sortAssets(parsed)
     } catch (err: unknown) {
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return []
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        // Recover from a crash that left a .tmp file orphaned.
+        const tmp = `${this.registryPath}.tmp`
+        try {
+          await fs.stat(tmp)
+          await fs.rename(tmp, this.registryPath)
+          const raw = await fs.readFile(this.registryPath, 'utf-8')
+          return sortAssets(JSON.parse(raw) as ArtAsset[])
+        } catch {
+          // Neither registry nor tmp — fresh start.
+        }
+        return []
+      }
       throw err
     }
   }
@@ -192,7 +213,8 @@ export class ArtStore {
 
     await fs.mkdir(dir, { recursive: true })
 
-    const assets = await this.readRegistry()
+    return this.#withWriteLock(async () => {
+      const assets = await this.readRegistry()
     const existingIdx = assets.findIndex(
       (asset) =>
         asset.kind === kind &&
@@ -232,6 +254,7 @@ export class ArtStore {
 
     await this.writeRegistry(assets)
     return asset
+    })
   }
 
   filePathFor(asset: ArtAsset): string {
@@ -247,20 +270,22 @@ export class ArtStore {
 
   async deleteArt(id: string): Promise<boolean> {
     const safeId = safePart(id, 'art id')
-    const assets = await this.readRegistry()
-    const idx = assets.findIndex((asset) => asset.id === safeId)
-    if (idx === -1) return false
+    return this.#withWriteLock(async () => {
+      const assets = await this.readRegistry()
+      const idx = assets.findIndex((asset) => asset.id === safeId)
+      if (idx === -1) return false
 
-    const asset = assets[idx]
-    try {
-      await fs.unlink(this.filePathFor(asset))
-    } catch (err: unknown) {
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
-    }
+      const asset = assets[idx]
+      try {
+        await fs.unlink(this.filePathFor(asset))
+      } catch (err: unknown) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+      }
 
-    assets.splice(idx, 1)
-    await this.writeRegistry(assets)
-    return true
+      assets.splice(idx, 1)
+      await this.writeRegistry(assets)
+      return true
+    })
   }
 }
 

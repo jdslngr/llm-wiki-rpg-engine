@@ -76,8 +76,11 @@ export default function ArtAdminScreen({ onBack }: Props) {
   const [error, setError] = useState('')
   const [okMsg, setOkMsg] = useState('')
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [existingLoading, setExistingLoading] = useState(false)
 
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const previewUrlRef = useRef<string | null>(null)
+  const loadExistingAbortRef = useRef<AbortController | null>(null)
 
   // ── Load chapter list ──────────────────────────────────────────────────────
 
@@ -100,30 +103,53 @@ export default function ArtAdminScreen({ onBack }: Props) {
 
   // ── Load existing art for the selected chapter ─────────────────────────────
 
-  async function loadExistingArt(chNum: number) {
+  async function loadExistingArt(chNum: number, signal?: AbortSignal) {
+    const sig = signal ?? new AbortController().signal
     setExisting(null)
+    setExistingLoading(true)
     try {
-      const res = await fetch(`/api/admin/art/${chNum}`)
-      if (!res.ok) return
-      setExisting(await res.json())
-    } catch {
-      /* non-fatal */
+      const res = await fetch(`/api/admin/art/${chNum}`, { signal: sig })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        if (!sig.aborted) setError((data as { error?: string }).error ?? 'Could not load existing art.')
+        return
+      }
+      const data = await res.json()
+      if (!sig.aborted) setExisting(data)
+    } catch (err) {
+      if (err instanceof DOMException && err.name === 'AbortError') return
+      if (!sig.aborted) setError('Could not load existing art.')
+    } finally {
+      if (!sig.aborted) setExistingLoading(false)
     }
   }
   useEffect(() => {
     setError('')
     setOkMsg('')
-    loadExistingArt(chapterNumber)
+    loadExistingAbortRef.current?.abort()
+    const controller = new AbortController()
+    loadExistingAbortRef.current = controller
+    loadExistingArt(chapterNumber, controller.signal)
+    return () => {
+      loadExistingAbortRef.current?.abort()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chapterNumber])
 
   // ── Revoke preview URLs on cleanup ─────────────────────────────────────────
 
   useEffect(() => {
+    // Track previewUrl in a ref so the unmount cleanup always sees the latest value.
+    previewUrlRef.current = previewUrl
+  }, [previewUrl])
+
+  useEffect(() => {
     return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl)
+      if (previewUrlRef.current) {
+        URL.revokeObjectURL(previewUrlRef.current)
+        previewUrlRef.current = null
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   // ── File change handler ────────────────────────────────────────────────────
@@ -352,6 +378,9 @@ export default function ArtAdminScreen({ onBack }: Props) {
                     src={previewUrl}
                     controls
                     muted
+                    autoPlay
+                    loop
+                    playsInline
                     className="w-full rounded-sm"
                     style={{ aspectRatio: '9/16' }}
                   />
@@ -389,8 +418,10 @@ export default function ArtAdminScreen({ onBack }: Props) {
             Existing Art — Chapter {chapterNumber}
           </h2>
 
-          {!existing ? (
+          {existingLoading ? (
             <p className="text-xs text-text-dim" style={fontBody}>Loading…</p>
+          ) : !existing ? (
+            <p className="text-xs text-text-dim" style={fontBody}>Could not load existing art.</p>
           ) : (!existing.chapterArt && beatAssets.length === 0) ? (
             <p className="text-xs text-text-dim" style={fontBody}>No art uploaded for this chapter yet.</p>
           ) : (
@@ -455,7 +486,10 @@ function ArtRow({
         ) : (
           <video
             src={art.url}
+            autoPlay
             muted
+            loop
+            playsInline
             className="w-full h-full object-cover"
           />
         )}

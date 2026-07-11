@@ -194,8 +194,11 @@ function getReachedAnchors(pt: Playthrough, chapterNumber: number): string[] | n
   const currentAnchor = anchorOf(pt.wiki)
   if (currentAnchor === CHAPTER_END) return anchors
 
+  // If the current anchor isn't in this chapter's anchor list (e.g. the chapter
+  // was re-authored and the anchor renamed), return all anchors — the player has
+  // already earned their art and shouldn't lose it.
   const idx = anchors.indexOf(currentAnchor)
-  return idx === -1 ? anchors.slice(0, 1) : anchors.slice(0, idx + 1)
+  return idx === -1 ? anchors : anchors.slice(0, idx + 1)
 }
 
 function isArtUnlocked(pt: Playthrough, asset: ArtAsset): boolean {

@@ -41,9 +41,12 @@ export default function ChapterArtScreen({ playthroughId, onBack }: Props) {
       setError('')
       try {
         const res = await fetch(`/api/art/gallery/${encodeURIComponent(playthroughId)}`)
-        const data = await res.json()
         if (cancelled) return
-        if (!res.ok) throw new Error(data.error ?? 'Could not load gallery.')
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}))
+          throw new Error((errData as { error?: string }).error ?? 'Could not load gallery.')
+        }
+        const data: ArtGalleryResponse = await res.json()
         setGallery(data)
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'Could not load gallery.')
@@ -308,6 +311,7 @@ function ArtCard({
           ) : (
             <video
               src={art.url}
+              autoPlay
               muted
               loop
               playsInline

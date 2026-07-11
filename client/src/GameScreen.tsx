@@ -72,12 +72,12 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
       const params = new URLSearchParams({ playthroughId: initialState.playthroughId })
       try {
         const res = await fetch(`/api/art/${chapterNumber}?${params.toString()}`)
+        if (cancelled) return
+        if (!res.ok) return // best-effort; don't parse JSON on non-OK responses
         const data: ChapterArtResponse = await res.json()
         if (cancelled) return
-        if (res.ok) {
-          setChapterArt(data.chapterArt)
-          setBeatArtByAnchor(data.beatArt)
-        }
+        setChapterArt(data.chapterArt)
+        setBeatArtByAnchor(data.beatArt)
       } catch {
         /* art is best-effort; never block the game on it */
       }
@@ -892,7 +892,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
         {/* Debug panel — dev or admin (takes priority over beat art rail) */}
         {(import.meta.env.DEV || isAdmin) && showDebug && (
           <aside
-            className="w-full overflow-y-auto border p-4 text-xs md:w-80 md:shrink-0"
+            className="w-full overflow-y-auto border p-4 text-xs md:w-[260px] md:shrink-0"
             style={{
               borderColor: 'var(--color-gold-dim)',
               background: 'var(--color-bg-card)',

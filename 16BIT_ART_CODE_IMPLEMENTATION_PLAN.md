@@ -948,6 +948,19 @@ Implementation note, 2026-07-12:
   art files in architecture tree.
 - ✅ `Technical_Specifications.md` updated: art storage section in §2 Data Model, art API
   routes in §7 API Surface, art modules in §8 Module Map, updated screen routing values.
+- Post-audit bug fixes (2026-07-12):
+  - **Client:** Fixed stale closure in ArtAdminScreen previewUrl cleanup (now tracked via ref).
+    Fixed race condition in loadExistingArt (now uses AbortController; added existingLoading
+    state for error visibility). Fixed ArtRow and upload preview videos missing autoPlay, loop,
+    playsInline. Fixed ArtCard thumbnail video missing autoPlay. Fixed GameScreen and
+    ChapterArtScreen fetch ordering (check res.ok before parsing JSON). Fixed debug panel width
+    (320px → 260px) to match beat art rail and prevent layout shift.
+  - **Server:** Fixed race condition in ArtStore.upsertArt/deleteArt — added sequential write
+    lock (#withWriteLock) so concurrent writes never lose registry updates. Fixed orphaned .tmp
+    file recovery in readRegistry — checks for and recovers a registry.json.tmp left by a crash.
+    Fixed getReachedAnchors fallback — when the current wiki anchor isn't in the chapter spec
+    (e.g. chapter was re-authored), returns all anchors instead of only the first, so players
+    don't lose already-earned art.
 - Manual browser checks (per plan acceptance criteria) should be performed by the operator
   before declaring the feature shipped. The production-style `docker compose up` check is
   covered by Phase 7; the `/api/health` endpoint should return `{"ok":true,"store":"postgres"}`.
