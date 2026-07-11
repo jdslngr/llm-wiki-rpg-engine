@@ -20,6 +20,8 @@
     "cookie-parser": "^1.4.7",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "file-type": "^22.0.1",
+    "multer": "^2.2.0",
     "pg": "^8.22.0",
     "zod": "^4.4.3"
   },
@@ -27,6 +29,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/cookie-parser": "^1.4.10",
     "@types/express": "^5.0.6",
+    "@types/multer": "^2.2.0",
     "@types/node": "^26.0.1",
     "@types/pg": "^8.20.0",
     "tsx": "^4.22.4",

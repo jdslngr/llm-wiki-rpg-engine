@@ -1,6 +1,10 @@
 import 'dotenv/config'
 import express from 'express'
+import multer from 'multer'
+import { fileTypeFromBuffer } from 'file-type'
 import cookieParser from 'cookie-parser'
+import { createReadStream } from 'node:fs'
+import { stat } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { askLLM } from './llm.js'
@@ -8,7 +12,8 @@ import { validateCredentials } from './llm.js'
 import { encryptKey, decryptKey } from './crypto.js'
 import { streamPlayTurn, finalizeStructured, type PlayTurnRequest } from './playTurn.js'
 import { FRIENDLY_TURN_ERROR } from './retry.js'
-import { createStore, UserExistsError, type PlaythroughStore } from './store.js'
+import { createStore, UserExistsError } from './store.js'
+import { artStore, type ArtAsset, type ArtMimeType } from './artStore.js'
 import { runWriteBack } from './engine.js'
 import { consolidate, appendChapterLog } from './consolidate.js'
 import { migrateWiki } from './migrate.js'
@@ -24,7 +29,7 @@ import {
   chapterSpecWarnings,
 } from './chapters/defineChapter.js'
 import { expandChapterSpec, type ChapterBrief } from './expandChapter.js'
-import type { Turn, WikiMap, UserSettingsUpdate } from './types.js'
+import type { Playthrough, Turn, WikiMap, UserSettingsUpdate } from './types.js'
 
 // The store is chosen at boot: Postgres if DATABASE_URL is reachable, else in-memory.
 const store = await createStore()
@@ -59,6 +64,20 @@ const COOKIE_OPTS = {
   path: '/',
   secure: process.env.COOKIE_SECURE === 'true',
 }
+const ART_UPLOAD_MAX_BYTES = 50 * 1024 * 1024
+const ALLOWED_ART_MIME_TYPES: readonly ArtMimeType[] = [
+  'video/mp4',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'image/avif',
+]
+const ALLOWED_ART_MIME_SET = new Set<string>(ALLOWED_ART_MIME_TYPES)
+const artUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: ART_UPLOAD_MAX_BYTES },
+})
 
 // --- helpers ---------------------------------------------------------------
 
@@ -117,6 +136,87 @@ function resolveUserLlm(user: StoredUser): PlayTurnRequest['llm'] | undefined {
     console.error('[resolveUserLlm] BYOK key decryption failed:', err)
     return undefined
   }
+}
+function statePayload(pt: Playthrough, wiki = pt.wiki, history = pt.history) {
+  return {
+    playthroughId: pt.id,
+    character: dossierFor(pt.character, wiki),
+    anchor: anchorOf(wiki),
+    ...chapterMetaOf(wiki),
+    history,
+    actions: lastActionsOf(wiki),
+    wikiState: wikiStateOf(wiki),
+    setting: settingBody(wiki),
+  }
+}
+
+function parseChapterNumber(raw: unknown): number | null {
+  const value = Number(raw)
+  return Number.isInteger(value) && value > 0 ? value : null
+}
+
+function withPlayerArtUrl(asset: ArtAsset, playthroughId: string): ArtAsset {
+  const params = new URLSearchParams({ playthroughId, v: asset.updatedAt })
+  return { ...asset, url: `/api/art/media/${encodeURIComponent(asset.id)}?${params.toString()}` }
+}
+
+function withAdminArtUrl(asset: ArtAsset): ArtAsset {
+  return { ...asset, url: `/api/admin/art/media/${encodeURIComponent(asset.id)}` }
+}
+
+function artListResponse(assets: ArtAsset[], urlFor: (asset: ArtAsset) => ArtAsset) {
+  const chapterAsset = assets.find((asset) => asset.kind === 'chapter') ?? null
+  const beatArt: Record<string, ArtAsset> = {}
+  for (const asset of assets) {
+    if (asset.kind === 'beat' && asset.anchor) beatArt[asset.anchor] = urlFor(asset)
+  }
+  return {
+    chapterArt: chapterAsset ? urlFor(chapterAsset) : null,
+    beatArt,
+  }
+}
+
+async function requirePlaythroughOwnership(playthroughId: string, userId: string): Promise<Playthrough | null> {
+  const pt = await store.get(playthroughId)
+  if (!pt || pt.userId !== userId) return null
+  return pt
+}
+
+function getReachedAnchors(pt: Playthrough, chapterNumber: number): string[] | null {
+  if (!hasChapter(chapterNumber)) return null
+  const currentChapter = chapterNumOf(pt.wiki)
+  if (chapterNumber > currentChapter) return null
+
+  const chapter = getChapter(chapterNumber)
+  const anchors = [...chapter.anchorOrder]
+  if (chapterNumber < currentChapter) return anchors
+
+  const currentAnchor = anchorOf(pt.wiki)
+  if (currentAnchor === CHAPTER_END) return anchors
+
+  const idx = anchors.indexOf(currentAnchor)
+  return idx === -1 ? anchors.slice(0, 1) : anchors.slice(0, idx + 1)
+}
+
+function isArtUnlocked(pt: Playthrough, asset: ArtAsset): boolean {
+  const reached = getReachedAnchors(pt, asset.chapterNumber)
+  if (reached === null) return false
+  return asset.kind === 'chapter' || (!!asset.anchor && reached.includes(asset.anchor))
+}
+
+async function sniffArtMime(buffer: Buffer): Promise<ArtMimeType | null> {
+  const sniffed = await fileTypeFromBuffer(buffer)
+  const mime = sniffed?.mime
+  return mime && ALLOWED_ART_MIME_SET.has(mime) ? (mime as ArtMimeType) : null
+}
+
+function jsonUploadError(err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction): void {
+  if (err instanceof multer.MulterError) {
+    const status = err.code === 'LIMIT_FILE_SIZE' ? 413 : 400
+    res.status(status).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'Art file is too large.' : err.message })
+    return
+  }
+  next(err)
 }
 
 // --- Public routes (no auth required) --------------------------------------
@@ -381,15 +481,7 @@ app.post('/api/saves/:id/resume', async (req, res) => {
     }
     pt.wiki = migrateWiki(pt.wiki) // seed any fields a new chapter/version added
     res.cookie(PID_COOKIE, pt.id, COOKIE_OPTS)
-    res.json({
-      character: dossierFor(pt.character, pt.wiki),
-      anchor: anchorOf(pt.wiki),
-      ...chapterMetaOf(pt.wiki),
-      history: pt.history,
-      actions: lastActionsOf(pt.wiki),
-      wikiState: wikiStateOf(pt.wiki),
-      setting: settingBody(pt.wiki),
-    })
+    res.json(statePayload(pt))
   } catch (err) {
     console.error('[/api/saves/:id/resume] error:', err)
     res.status(500).json({ error: 'Could not resume save.' })
@@ -415,15 +507,7 @@ app.post('/api/new-game', async (req, res) => {
 
     const pt = await store.create(character, wiki, history, req.userId!)
     res.cookie(PID_COOKIE, pt.id, COOKIE_OPTS)
-    res.json({
-      character: dossierFor(character, wiki),
-      anchor: anchorOf(wiki),
-      ...chapterMetaOf(wiki),
-      history,
-      actions: opening.actions,
-      wikiState: wikiStateOf(wiki),
-      setting: settingBody(wiki),
-    })
+    res.json(statePayload(pt, wiki, history))
   } catch (err) {
     console.error('[/api/new-game] error:', err)
     res.status(500).json({ error: err instanceof Error ? err.message : 'Could not start a new game' })
@@ -455,15 +539,7 @@ app.get('/api/state', async (req, res) => {
     return
   }
   pt.wiki = migrateWiki(pt.wiki) // seed any fields a new chapter/version added
-  res.json({
-    character: dossierFor(pt.character, pt.wiki),
-    anchor: anchorOf(pt.wiki),
-    ...chapterMetaOf(pt.wiki),
-    history: pt.history,
-    actions: lastActionsOf(pt.wiki),
-    wikiState: wikiStateOf(pt.wiki),
-    setting: settingBody(pt.wiki),
-  })
+  res.json(statePayload(pt))
 })
 
 // Phase 6: the chapter-end recap. Only valid once the chapter is complete (END).
@@ -560,15 +636,7 @@ app.post('/api/next-chapter', async (req, res) => {
     const history: Turn[] = [...pt.history, { role: 'ai', content: opening.prose }]
 
     await store.save(pt.id, wiki, history)
-    res.json({
-      character: dossierFor(pt.character, wiki),
-      anchor: anchorOf(wiki),
-      ...chapterMetaOf(wiki),
-      history,
-      actions: opening.actions,
-      wikiState: wikiStateOf(wiki),
-      setting: settingBody(wiki),
-    })
+    res.json(statePayload(pt, wiki, history))
   } catch (err) {
     console.error('[/api/next-chapter] error:', err)
     res.status(500).json({ error: 'Could not start the next chapter.' })
@@ -594,15 +662,7 @@ app.post('/api/rollback', async (req, res) => {
   const newHistory = pt.history.slice(0, Math.max(0, pt.history.length - 2))
   await store.save(pt.id, prev, newHistory)
   await store.dropLastSnapshot(pt.id)
-  res.json({
-    character: dossierFor(pt.character, prev),
-    anchor: anchorOf(prev),
-    ...chapterMetaOf(prev),
-    history: newHistory,
-    actions: lastActionsOf(prev),
-    wikiState: wikiStateOf(prev),
-    setting: settingBody(prev),
-  })
+  res.json(statePayload(pt, prev, newHistory))
 })
 
 // The core game loop. Loads server-owned state, STREAMS the narrative as NDJSON, then
@@ -743,6 +803,255 @@ app.post('/api/play-turn', async (req, res) => {
     }
   } finally {
     turnsInFlight.delete(pt.id)
+  }
+})
+// --- Art routes (protected, ownership-checked) -----------------------------
+// Route order matters: literal /media and /gallery routes must be registered before
+// generic :chapterNumber routes, or Express can route media/gallery requests into
+// the chapterNumber handlers.
+
+app.get('/api/art/media/:artId', async (req, res) => {
+  const playthroughId = String(req.query.playthroughId ?? '').trim()
+  if (!playthroughId) {
+    res.status(400).json({ error: 'Missing playthroughId.' })
+    return
+  }
+
+  try {
+    const pt = await requirePlaythroughOwnership(playthroughId, req.userId!)
+    if (!pt) { res.status(404).json({ error: 'Not found.' }); return }
+
+    const asset = await artStore.getArtById(String(req.params.artId ?? ''))
+    if (!asset || !isArtUnlocked(pt, asset)) {
+      res.status(404).json({ error: 'Not found.' })
+      return
+    }
+
+    const filePath = artStore.filePathFor(asset)
+    try { await stat(filePath) } catch {
+      res.status(404).json({ error: 'Not found.' })
+      return
+    }
+
+    res.setHeader('Content-Type', asset.mimeType)
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.setHeader('Cache-Control', 'private, max-age=3600')
+    createReadStream(filePath).pipe(res)
+  } catch (err) {
+    console.error('[/api/art/media/:artId] error:', err)
+    if (!res.headersSent) res.status(500).json({ error: 'Could not serve art.' })
+  }
+})
+
+app.get('/api/art/gallery/:playthroughId', async (req, res) => {
+  const playthroughId = String(req.params.playthroughId ?? '')
+
+  try {
+    const pt = await requirePlaythroughOwnership(playthroughId, req.userId!)
+    if (!pt) { res.status(404).json({ error: 'Not found.' }); return }
+
+    const currentChapter = chapterNumOf(pt.wiki)
+    const currentAnchor = anchorOf(pt.wiki)
+    const chapters = []
+
+    for (let chapterNumber = 1; chapterNumber <= currentChapter; chapterNumber++) {
+      if (!hasChapter(chapterNumber)) continue
+      const reachedAnchors = getReachedAnchors(pt, chapterNumber)
+      if (reachedAnchors === null) continue
+
+      const chapter = getChapter(chapterNumber)
+      const assets = await artStore.listChapterArt(chapterNumber)
+      const chapterAsset = assets.find((asset) => asset.kind === 'chapter') ?? null
+      const beatArts = reachedAnchors.map((anchor) => {
+        const art = assets.find((asset) => asset.kind === 'beat' && asset.anchor === anchor) ?? null
+        return {
+          anchor,
+          anchorTitle: chapter.anchorTitles[anchor] ?? anchor,
+          art: art ? withPlayerArtUrl(art, playthroughId) : null,
+        }
+      })
+
+      chapters.push({
+        chapterNumber,
+        chapterTitle: chapter.title,
+        state: chapterNumber < currentChapter || currentAnchor === CHAPTER_END ? 'completed' : 'current',
+        chapterArt: chapterAsset ? withPlayerArtUrl(chapterAsset, playthroughId) : null,
+        beatArts,
+      })
+    }
+
+    res.json({ chapters })
+  } catch (err) {
+    console.error('[/api/art/gallery/:playthroughId] error:', err)
+    res.status(500).json({ error: 'Could not load gallery.' })
+  }
+})
+
+app.get('/api/art/:chapterNumber', async (req, res) => {
+  const chapterNumber = parseChapterNumber(req.params.chapterNumber)
+  const playthroughId = String(req.query.playthroughId ?? '').trim()
+  if (!chapterNumber || !playthroughId) {
+    res.status(400).json({ error: 'Invalid chapterNumber or missing playthroughId.' })
+    return
+  }
+
+  try {
+    const pt = await requirePlaythroughOwnership(playthroughId, req.userId!)
+    if (!pt) { res.status(404).json({ error: 'Not found.' }); return }
+
+    const reachedAnchors = getReachedAnchors(pt, chapterNumber)
+    if (reachedAnchors === null) { res.status(404).json({ error: 'Not found.' }); return }
+
+    const assets = await artStore.listChapterArt(chapterNumber)
+    const visibleAssets = assets.filter(
+      (asset) => asset.kind === 'chapter' || (!!asset.anchor && reachedAnchors.includes(asset.anchor)),
+    )
+    res.json(artListResponse(visibleAssets, (asset) => withPlayerArtUrl(asset, playthroughId)))
+  } catch (err) {
+    console.error('[/api/art/:chapterNumber] error:', err)
+    res.status(500).json({ error: 'Could not load art.' })
+  }
+})
+
+app.get('/api/art/:chapterNumber/:anchor', async (req, res) => {
+  const chapterNumber = parseChapterNumber(req.params.chapterNumber)
+  const anchor = String(req.params.anchor ?? '')
+  const playthroughId = String(req.query.playthroughId ?? '').trim()
+  if (!chapterNumber || !anchor || !playthroughId) {
+    res.status(400).json({ error: 'Invalid request.' })
+    return
+  }
+
+  try {
+    const pt = await requirePlaythroughOwnership(playthroughId, req.userId!)
+    if (!pt) { res.status(404).json({ error: 'Not found.' }); return }
+
+    const reachedAnchors = getReachedAnchors(pt, chapterNumber)
+    if (reachedAnchors === null || !reachedAnchors.includes(anchor)) {
+      res.status(404).json({ error: 'Not found.' })
+      return
+    }
+
+    const art = await artStore.getBeatArt(chapterNumber, anchor)
+    res.json({ art: art ? withPlayerArtUrl(art, playthroughId) : null })
+  } catch (err) {
+    console.error('[/api/art/:chapterNumber/:anchor] error:', err)
+    res.status(500).json({ error: 'Could not load art.' })
+  }
+})
+
+// Admin art routes. Keep literal routes before parameter routes.
+app.get('/api/admin/art/chapters', requireAdmin(store), async (_req, res) => {
+  try {
+    const authored = await store.listChapterSpecs()
+    const numbers = [...new Set([1, ...authored.map((row) => row.number)])]
+      .filter((number) => hasChapter(number))
+      .sort((a, b) => a - b)
+
+    res.json({
+      chapters: numbers.map((number) => {
+        const chapter = getChapter(number)
+        return {
+          number,
+          title: chapter.title,
+          anchors: chapter.anchorOrder.map((id) => ({ id, title: chapter.anchorTitles[id] ?? id })),
+        }
+      }),
+    })
+  } catch (err) {
+    console.error('[/api/admin/art/chapters] error:', err)
+    res.status(500).json({ error: 'Could not load chapters.' })
+  }
+})
+
+app.post('/api/admin/art/upload', requireAdmin(store), artUpload.single('file'), async (req, res) => {
+  const chapterNumber = parseChapterNumber(req.body?.chapterNumber)
+  const anchor = typeof req.body?.anchor === 'string' && req.body.anchor.trim() ? req.body.anchor.trim() : null
+  if (!chapterNumber || !hasChapter(chapterNumber)) {
+    res.status(400).json({ error: 'Unknown chapter.' })
+    return
+  }
+  if (!req.file) {
+    res.status(400).json({ error: 'Upload a file.' })
+    return
+  }
+
+  const chapter = getChapter(chapterNumber)
+  if (anchor && !chapter.anchorOrder.includes(anchor)) {
+    res.status(400).json({ error: 'Unknown beat anchor.' })
+    return
+  }
+
+  try {
+    const mimeType = await sniffArtMime(req.file.buffer)
+    if (!mimeType) {
+      res.status(400).json({ error: 'Unsupported art file type.' })
+      return
+    }
+
+    const art = await artStore.upsertArt({
+      chapterNumber,
+      anchor,
+      anchorTitle: anchor ? chapter.anchorTitles[anchor] ?? anchor : undefined,
+      chapterTitle: chapter.title,
+      fileBuffer: req.file.buffer,
+      mimeType,
+      updatedBy: req.userId!,
+    })
+
+    res.json({ ok: true, art: withAdminArtUrl(art) })
+  } catch (err) {
+    console.error('[/api/admin/art/upload] error:', err)
+    res.status(500).json({ error: 'Could not save art.' })
+  }
+})
+app.use('/api/admin/art/upload', jsonUploadError)
+
+app.get('/api/admin/art/media/:artId', requireAdmin(store), async (req, res) => {
+  try {
+    const asset = await artStore.getArtById(String(req.params.artId ?? ''))
+    if (!asset) { res.status(404).json({ error: 'Not found.' }); return }
+
+    const filePath = artStore.filePathFor(asset)
+    try { await stat(filePath) } catch {
+      res.status(404).json({ error: 'Not found.' })
+      return
+    }
+
+    res.setHeader('Content-Type', asset.mimeType)
+    res.setHeader('X-Content-Type-Options', 'nosniff')
+    res.setHeader('Cache-Control', 'private, max-age=3600')
+    createReadStream(filePath).pipe(res)
+  } catch (err) {
+    console.error('[/api/admin/art/media/:artId] error:', err)
+    if (!res.headersSent) res.status(500).json({ error: 'Could not serve art.' })
+  }
+})
+
+app.get('/api/admin/art/:chapterNumber', requireAdmin(store), async (req, res) => {
+  const chapterNumber = parseChapterNumber(req.params.chapterNumber)
+  if (!chapterNumber || !hasChapter(chapterNumber)) {
+    res.status(404).json({ error: 'Chapter not found.' })
+    return
+  }
+
+  try {
+    const assets = await artStore.listChapterArt(chapterNumber)
+    res.json(artListResponse(assets, withAdminArtUrl))
+  } catch (err) {
+    console.error('[/api/admin/art/:chapterNumber] error:', err)
+    res.status(500).json({ error: 'Could not load art.' })
+  }
+})
+
+app.delete('/api/admin/art/:artId', requireAdmin(store), async (req, res) => {
+  try {
+    const deleted = await artStore.deleteArt(String(req.params.artId ?? ''))
+    if (!deleted) { res.status(404).json({ error: 'Art not found.' }); return }
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('[/api/admin/art/:artId DELETE] error:', err)
+    res.status(500).json({ error: 'Could not delete art.' })
   }
 })
 

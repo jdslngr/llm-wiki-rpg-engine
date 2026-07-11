@@ -517,6 +517,23 @@ Suggested commit:
 add protected art API routes
 ```
 
+Implementation note, 2026-07-12:
+
+- Installed `multer`, `file-type`, and `@types/multer`.
+- Updated server state-shaped responses from new-game, resume, state, next-chapter, and rollback
+  to include `playthroughId` through a shared `statePayload()` helper.
+- Added shared art helpers for player/admin media URLs, chapter/beat art response shaping,
+  playthrough ownership checks, reached-anchor unlock checks, MIME sniffing, and Multer JSON
+  error handling.
+- Added protected player routes in literal-before-param order: `/api/art/media/:artId`,
+  `/api/art/gallery/:playthroughId`, `/api/art/:chapterNumber`, and
+  `/api/art/:chapterNumber/:anchor`.
+- Added admin-only art chapter listing, upload, preview media, chapter art listing, and delete
+  routes. Uploads are memory-backed, capped at 50 MB, byte-sniffed with `file-type`, and saved
+  only after resolving to the allowed MP4/JPEG/PNG/WebP/GIF/AVIF MIME list.
+- Validation run for this phase: `npm --prefix server run build`, `npm exec -- tsx
+  src/verify-art-store.ts` from `server/`, and full `npm run build`.
+
 ## Phase 3: Client Types and Routing
 
 Files:
