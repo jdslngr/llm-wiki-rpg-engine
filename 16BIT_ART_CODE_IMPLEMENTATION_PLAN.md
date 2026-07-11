@@ -939,6 +939,19 @@ persist art uploads in docker
 
 ## Phase 8: Verification
 
+Implementation note, 2026-07-12:
+
+- ✅ `npm run build` — client TS + Vite (28 modules), server TS — all clean.
+- ✅ `npm exec -- tsx src/verify-art-store.ts` from `server/` — all 27 assertions pass.
+- ✅ `npm --prefix client run lint` — oxlint clean (no warnings).
+- ✅ `README.md` updated: feature bullet for 16-bit art, art API routes in Core API section,
+  art files in architecture tree.
+- ✅ `Technical_Specifications.md` updated: art storage section in §2 Data Model, art API
+  routes in §7 API Surface, art modules in §8 Module Map, updated screen routing values.
+- Manual browser checks (per plan acceptance criteria) should be performed by the operator
+  before declaring the feature shipped. The production-style `docker compose up` check is
+  covered by Phase 7; the `/api/health` endpoint should return `{"ok":true,"store":"postgres"}`.
+
 Run from repo root:
 
 ```bash

@@ -130,6 +130,10 @@ real playthrough: turn 2 read 5,210 of 5,550 input tokens from cache, turn 3 rea
 - ✎ **In-app chapter authoring (admin-only)** — sketch beats in plain language, an AI
   expands them into a full chapter, review/edit, then save — live immediately, no redeploy.
   See [ADDING_CHAPTERS.md](ADDING_CHAPTERS.md).
+- 🎨 **16-bit chapter & beat art (admin-curated)** — upload portrait MP4/JPEG/PNG/WebP/GIF/AVIF
+  art per chapter and beat (up to 50 MB); player-facing gallery per save; desktop art rails and
+  mobile inline art in the game screen. All media served through ownership-checked, unlock-gated
+  URLs — no public static art route. See [16BIT_ART_CODE_IMPLEMENTATION_PLAN.md](16BIT_ART_CODE_IMPLEMENTATION_PLAN.md).
 - 🗄️ **Persistence with zero-setup fallback** — Postgres when available, in-memory
   otherwise, behind one interface.
 - 🐳 **Self-hostable** — `docker compose up` brings up the app + Postgres; no vendor lock-in.
@@ -205,6 +209,7 @@ server/src/
   migrate.ts           on load, seed missing scratch fields (old-save insurance)
   playTurn.ts          prompt assembly + streamed structured submit_turn (zod)
   store.ts             persistence: Postgres or in-memory, behind one interface
+  artStore.ts          filesystem-backed art registry (metadata + uploaded files, served through protected URLs)
   llm.ts               provider layer — swap vendors via env; prompt caching; BYOK
   auth.ts              bcrypt hashing, session tokens, requireAuth/requireAdmin middleware
   recap.ts             chapter-end recap (engine facts + notable AI facts + one AI prose call)
@@ -224,6 +229,9 @@ client/src/
   App.tsx              screen router (login → saves → character select → game → authoring)
   GameScreen.tsx       the streaming game UI (story log, actions, input)
   AuthoringScreen.tsx  admin-only chapter authoring UI (brief → AI draft → review → save)
+  ArtAdminScreen.tsx   admin-only art upload / delete UI (chapter/beat selector, MIME + size validation, preview)
+  ChapterArtScreen.tsx per-save art gallery (chapter list → detail → full-screen overlay)
+  ArtLoop.tsx          shared MIME-branching art renderer (<img> for images, <video> for MP4)
   CharacterSelectScreen.tsx · SavesScreen.tsx · RecapScreen.tsx · SettingsScreen.tsx · Login/Signup
 ```
 
@@ -246,6 +254,16 @@ everything else is the reusable engine. The full recipe is in
   `POST /api/admin/expand-chapter` (brief → AI-drafted `ChapterSpec`) ·
   `POST /api/admin/save-chapter` (validate + persist + register live) ·
   `GET /api/admin/chapters` · `GET /api/admin/chapters/:n` · `DELETE /api/admin/chapters/:n`
+- **Art gallery** (ownership-checked, unlock-gated):
+  `GET /api/art/gallery/:playthroughId` (per-save chapter-organized gallery) ·
+  `GET /api/art/:chapterNumber?playthroughId=` (chapter + beat art for the game screen) ·
+  `GET /api/art/:chapterNumber/:anchor?playthroughId=` (single beat art) ·
+  `GET /api/art/media/:artId?playthroughId=` (protected media streaming)
+- **Admin-only — art management**: `GET /api/admin/art/chapters` (chapter options for the uploader) ·
+  `POST /api/admin/art/upload` (multipart, 50 MB cap, file-signature sniffing, allowed MIME list) ·
+  `GET /api/admin/art/:chapterNumber` (existing art for a chapter, unfiltered) ·
+  `GET /api/admin/art/media/:artId` (admin preview streaming) ·
+  `DELETE /api/admin/art/:artId`
 
 ---
 

@@ -114,6 +114,24 @@ Notes:
 - `wiki_history` keeps exactly one snapshot at a time (consumed and dropped by rollback) — it
   is not a full turn-by-turn audit log.
 
+**Art storage** (`server/src/artStore.ts`) is an independent filesystem-backed registry — it does
+not use Postgres tables in v1:
+
+- **Registry:** `server/data/art/registry.json` — a JSON array of `ArtAsset` objects (id, kind,
+  chapterNumber, anchor, title, label, filename, url, mimeType, sizeBytes, updatedAt, updatedBy).
+  Written atomically (tmp → rename).
+- **Files:** stored under `server/data/art/beats/chapter-{n}/` with deterministic names —
+  `chapter-art.{ext}` for chapter art, `{anchor-lowercase}-{slug}.{ext}` for beat art.
+- **Environment:** `ART_DIR` (defaults to `cwd/data/art`) overrides the storage root. In Docker,
+  set to `/app/server/data/art` and backed by the `artdata` named volume for persistence.
+- **Security:** path parts are sanitized; uploaded filenames are never used as disk paths;
+  MIME types are server-sniffed with `file-type` before persisting metadata or choosing
+  extensions; only MP4, JPEG, PNG, WebP, GIF, and AVIF are accepted (50 MB hard cap).
+- **Media serving:** no public static route. All player-facing art streams through
+  `GET /api/art/media/:artId?playthroughId=` with ownership verification + unlock-gating;
+  admin previews through `GET /api/admin/art/media/:artId` behind `requireAdmin`.
+  `X-Content-Type-Options: nosniff` is set on all media responses.
+
 ---
 
 ## 3. The turn loop, end to end
@@ -354,6 +372,23 @@ additionally require the session's username to be listed in `ADMIN_USERNAMES`.
 | `GET /api/admin/chapters/:n` | Fetch one chapter's full spec (to reload into the editor). |
 | `DELETE /api/admin/chapters/:n` | Remove an authored chapter (Chapter 1 is protected). |
 
+**Protected — art gallery** (ownership-checked, unlock-gated per chapter/beat)
+| Route | Purpose |
+|---|---|
+| `GET /api/art/gallery/:playthroughId` | Chapter-organized gallery for a specific save (completed + current chapters). |
+| `GET /api/art/:chapterNumber?playthroughId=` | Chapter art + reached beat art for the active game screen. |
+| `GET /api/art/:chapterNumber/:anchor?playthroughId=` | Single beat art lookup. |
+| `GET /api/art/media/:artId?playthroughId=` | Protected media streaming (`X-Content-Type-Options: nosniff`). |
+
+**Admin-only — art management** (multipart upload, 50 MB cap, file-signature sniffing)
+| Route | Purpose |
+|---|---|
+| `GET /api/admin/art/chapters` | Chapter options (built-in + authored) for the uploader UI. |
+| `POST /api/admin/art/upload` | Upload chapter/beat art (multipart: file, chapterNumber, optional anchor). |
+| `GET /api/admin/art/:chapterNumber` | Existing art for a chapter (unfiltered by unlock state, admin preview URLs). |
+| `GET /api/admin/art/media/:artId` | Admin media preview streaming. |
+| `DELETE /api/admin/art/:artId` | Delete art (metadata + file). |
+
 ---
 
 ## 8. Module map
@@ -363,6 +398,7 @@ additionally require the session's username to be listed in `ADMIN_USERNAMES`.
 |---|---|
 | `index.ts` | Express app, every route, auth wall, store/chapter-registry init at boot. |
 | `store.ts` | `PlaythroughStore` interface; `PgStore` and `MemStore` implementations. |
+| `artStore.ts` | Filesystem-backed art registry: read/write `registry.json`, deterministic upload paths, MIME validation, path sanitization, atomic writes. |
 | `types.ts` | Shared server-side types (`WikiMap`, `Turn`, `Playthrough`, `User`, `SaveEntry`, …). |
 | `auth.ts` | Password hashing/validation, `requireAuth`/`requireAdmin` middleware. |
 | `llm.ts` | Provider abstraction over the AI SDK; model resolution for hosted vs. BYOK. |
@@ -396,13 +432,17 @@ additionally require the session's username to be listed in `ADMIN_USERNAMES`.
 | `RecapScreen.tsx` | Chapter-end recap + "Continue to Chapter N" / story-complete state. |
 | `SettingsScreen.tsx` | BYOK/hosted settings, key entry + validation. |
 | `AuthoringScreen.tsx` | Admin chapter-authoring UI (brief → expand → review → save/edit/delete). |
+| `ArtAdminScreen.tsx` | Admin art upload/delete UI (chapter/beat selector, MIME + size validation, local preview, existing-art list). |
+| `ChapterArtScreen.tsx` | Per-save player art gallery (chapter list → detail view → full-screen overlay). |
+| `ArtLoop.tsx` | Shared MIME-branching art renderer (`<img>` for images, `<video autoPlay muted loop playsInline>` for MP4). |
 | `types.ts` | Shared client-side shapes (mirrors the server's wire formats). |
 
 **Screen routing:** `App.tsx` holds a `screen` string in `useState` and renders one component
 per value (`'login' | 'signup' | 'saves' | 'select' | 'settings' | 'game' | 'recap' |
-'authoring'`); each screen takes callback props (`onLogin`, `onResume`, …) that call
-`setScreen`. On boot it calls `/api/auth/me` then `/api/state` to decide where to land. No
-client-side router library.
+'authoring' | 'artAdmin' | 'chapterArt'`); each screen takes callback props (`onLogin`,
+`onResume`, …) that call `setScreen`. The `chapterArt` screen also carries `artPlaythroughId`
+state scoped to the selected save (not the active `pid` cookie). On boot it calls
+`/api/auth/me` then `/api/state` to decide where to land. No client-side router library.
 
 ---
 
