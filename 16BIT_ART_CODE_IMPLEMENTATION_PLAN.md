@@ -711,6 +711,17 @@ File:
 
 - Add `client/src/ChapterArtScreen.tsx`.
 
+Implementation note, 2026-07-12:
+
+- Replaced the Phase 3 stub with a full per-save chapter art gallery styled to match `AuthoringScreen` and `ArtAdminScreen` (same header bar, card backgrounds, gold palette, font tokens).
+- Fetches gallery data from `GET /api/art/gallery/:playthroughId` scoped to the selected save id, not the active `pid` cookie.
+- **List view**: one card per reached chapter showing chapter number, title, completion state, and uploaded art count. Tapping opens detail view.
+- **Detail view**: chapter art displayed first, then beat art rows labelled `A4 — Whales`. Completed chapters show all beats; current chapter shows reached beats only. Each art item is a clickable thumbnail card.
+- **Full-screen overlay**: tapping any art opens a dimmed overlay. Images render as `<img>`; videos render with `autoPlay muted loop playsInline controls`. Close via ✕ button or background click.
+- Rendering branches on `mimeType` everywhere — `image/*` uses `<img>`, `video/mp4` uses `<video>`. Thumbnails use `aspect-[9/16]` with `object-cover` to avoid layout shift.
+- States covered: loading spinner, error banner, empty state ("No chapters reached yet"), and the full list/detail/overlay flow.
+- Validation run for this phase: `npm run build` (client TS + Vite, server TS), and `npm exec -- tsx src/verify-art-store.ts` from `server/` (all 27 verifier assertions pass).
+
 Props:
 
 ```ts
