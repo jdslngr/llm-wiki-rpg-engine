@@ -160,6 +160,18 @@ Stopgate:
   coding.
 - Do not expand scope beyond admin-curated chapter art and beat art.
 
+## Per-Phase Handoff Rule
+
+The coder must treat each phase as a separate checkpoint:
+
+1. Complete only the current phase.
+2. Run that phase's validation commands.
+3. Update this document with a short implementation note under the completed phase.
+4. Commit that phase before starting the next one.
+5. Stop and report status after the commit so the next phase can be reviewed deliberately.
+
+Do not batch multiple phases into one commit unless the user explicitly changes this instruction.
+
 ## Phase 1: Filesystem Art Store
 
 Files:
@@ -240,7 +252,9 @@ Verifier requirements:
 Run:
 
 ```bash
-npm --prefix server exec -- tsx src/verify-art-store.ts
+cd server
+npm exec -- tsx src/verify-art-store.ts
+cd ..
 ```
 
 Acceptance:
@@ -255,6 +269,20 @@ Suggested commit:
 ```text
 add filesystem art store and verifier
 ```
+
+Implementation note, 2026-07-12:
+
+- Added `server/src/artStore.ts` with a filesystem-backed registry, deterministic chapter/beat
+  filenames, MIME-derived extensions for MP4/JPEG/PNG/WebP/GIF/AVIF, path-part validation,
+  registry sorting, replacement cleanup, and a default `ART_DIR`-aware singleton.
+- Added `server/src/verify-art-store.ts` as a hermetic verifier covering empty registries,
+  chapter/beat upsert, replacement cleanup, deletion, traversal rejection, special-character
+  slugging, all supported image MIME extension mappings, unsupported MIME rejection, and
+  tampered registry filename rejection.
+- Phase 1 deliberately does not install `multer` or `file-type`; upload parsing and byte-signature
+  sniffing belong to Phase 2.
+- Validation run for this phase: `npm exec -- tsx src/verify-art-store.ts` from `server/`,
+  `npm --prefix server run build`, and full `npm run build`.
 
 ## Phase 2: Server Contract and Art Routes
 
@@ -852,7 +880,9 @@ npm run build
 Run the hermetic server verifier:
 
 ```bash
-npm --prefix server exec -- tsx src/verify-art-store.ts
+cd server
+npm exec -- tsx src/verify-art-store.ts
+cd ..
 ```
 
 Optional client lint:
