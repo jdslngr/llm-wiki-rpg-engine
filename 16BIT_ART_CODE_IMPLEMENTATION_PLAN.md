@@ -649,6 +649,18 @@ File:
 
 - Add `client/src/ArtAdminScreen.tsx`.
 
+Implementation note, 2026-07-12:
+
+- Replaced the Phase 3 stub with a full admin art management screen styled to match `AuthoringScreen` (same header bar, card backgrounds, input/button tokens, gold palette).
+- Loads chapter options from `GET /api/admin/art/chapters` and existing art from `GET /api/admin/art/:chapterNumber`.
+- Chapter number dropdown, optional beat anchor dropdown (blank = chapter art), and file picker accepting `.mp4,.jpg,.jpeg,.png,.webp,.gif,.avif`.
+- Client-side MIME validation against the allowed list. Shows file size; warns above 25 MB; blocks upload with a clear message above the 50 MB server hard cap.
+- Local preview renders images as `<img>` and videos as `<video>` with `aspect-[9/16]`. Object URLs are revoked in effect cleanup.
+- Upload posts `FormData` to `POST /api/admin/art/upload`; refreshes the existing art list on success.
+- Delete calls `DELETE /api/admin/art/:artId` with a confirmation prompt.
+- Existing art list shows thumbnails (branching on `mimeType`), labels, type/size info, and delete buttons.
+- Validation run for this phase: `npm run build` (client TS + Vite, server TS), and `npm exec -- tsx src/verify-art-store.ts` from `server/` (all 27 verifier assertions pass).
+
 Use `AuthoringScreen.tsx` as the local UI model:
 
 - compact operational admin screen;
