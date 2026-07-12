@@ -523,7 +523,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
       <div className="mx-auto flex min-h-0 w-full max-w-[1440px] flex-1 flex-col gap-4 px-safe py-4 xl:flex-row">
         {/* Desktop left rail — chapter art */}
         {chapterArt && (
-          <aside className="hidden xl:flex w-[220px] shrink-0 flex-col gap-2">
+          <aside className="hidden xl:flex self-center w-[220px] shrink-0 flex-col gap-2">
             <ArtLoop art={chapterArt} className="w-full rounded-sm object-cover" style={{ aspectRatio: '9/16' }} />
             <p className="text-[11px] text-text-muted text-center leading-tight" style={{ fontFamily: "'Lora', Georgia, serif" }}>
               {chapterArt.label}
@@ -884,7 +884,7 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
 
         {/* Desktop right rail — beat art (hidden when debug is open) */}
         {beatArt && (!showDebug || !(import.meta.env.DEV || isAdmin)) && (
-          <aside className="hidden xl:flex w-[260px] shrink-0 flex-col gap-2">
+          <aside className="hidden xl:flex self-center w-[260px] shrink-0 flex-col gap-2">
             <ArtLoop art={beatArt} className="w-full rounded-sm object-cover" style={{ aspectRatio: '9/16' }} />
             <p className="text-[11px] text-text-muted text-center leading-tight" style={{ fontFamily: "'Lora', Georgia, serif" }}>
               {beatArt.label}
