@@ -17,7 +17,7 @@ import { artStore, type ArtAsset, type ArtMimeType } from './artStore.js'
 import { runWriteBack } from './engine.js'
 import { consolidate, appendChapterLog } from './consolidate.js'
 import { migrateWiki } from './migrate.js'
-import { getChapter, hasChapter, registerSpec, unregisterChapter, loadAuthoredChapters, CHAPTER_END } from './chapters/index.js'
+import { getChapter, hasChapter, registerSpec, unregisterChapter, loadAuthoredChapters, CHAPTER_END, canAdvanceFrom } from './chapters/index.js'
 import { anchorOf, chapterNumOf, chapterMetaOf } from './chapterMeta.js'
 import { buildRecapFacts, generateRecapProse } from './recap.js'
 import { CHARACTERS, isPlayableId, buildStarterWiki, type PlayableId } from './game/characters.js'
@@ -29,6 +29,8 @@ import {
   chapterSpecWarnings,
 } from './chapters/defineChapter.js'
 import { expandChapterSpec, type ChapterBrief } from './expandChapter.js'
+import { ChapterEndLock } from './chapterEndLock.js'
+import { prepareChapterRecap, type RecapSnapshot, RecapCorruptionError } from './recapPreparation.js'
 import type { Playthrough, Turn, WikiMap, UserSettingsUpdate } from './types.js'
 
 // The store is chosen at boot: Postgres if DATABASE_URL is reachable, else in-memory.
@@ -47,6 +49,10 @@ store.deleteExpiredSessions().catch(() => {})
 // In-memory Set is correct for this single-process server; replace with a DB
 // advisory lock if this ever runs multi-instance.
 const turnsInFlight = new Set<string>()
+
+// Per-playthrough chapter-end lock: serialises recap generation and chapter
+// advance so concurrent /api/recap + /api/next-chapter calls can't race.
+const chapterEndLock = new ChapterEndLock()
 
 // Admin list set via ADMIN_USERNAMES env var (comma-separated).
 
@@ -101,9 +107,15 @@ function settingBody(wiki: WikiMap): string {
   return String(wiki['world-state.md']?.body ?? '')
 }
 
-// Map of filename -> frontmatter, for the client's debug panel.
+// Map of filename -> frontmatter, for the client's debug panel. Excludes engine-
+// managed meta files so the archive doesn't bloat every state/debug response
+// (sanity check #3).
 function wikiStateOf(wiki: WikiMap): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(wiki).map(([k, v]) => [k, v.frontmatter ?? {}]))
+  return Object.fromEntries(
+    Object.entries(wiki)
+      .filter(([k]) => k !== 'recap.md' && k !== 'recap-history.md')
+      .map(([k, v]) => [k, v.frontmatter ?? {}]),
+  )
 }
 
 function lastActionsOf(wiki: WikiMap): string[] {
@@ -546,8 +558,8 @@ app.get('/api/state', async (req, res) => {
 })
 
 // Phase 6: the chapter-end recap. Only valid once the chapter is complete (END).
-// Facts come from the final wiki; the warm prose is one AI call, cached into the
-// wiki so revisiting the recap doesn't re-bill the player.
+// Runs under the chapter-end lock to serialise with next-chapter; checks the
+// immutable archive first so repeat visits don't regenerate or re-bill.
 app.get('/api/recap', async (req, res) => {
   const id = req.cookies?.[PID_COOKIE]
   const pt = id ? await store.get(id) : null
@@ -560,39 +572,55 @@ app.get('/api/recap', async (req, res) => {
     return
   }
 
-  const facts = buildRecapFacts(pt.character as PlayableId, pt.wiki, pt.history)
-  // Whether a "Continue to Chapter N" path exists, or this is the end of the story.
-  const hasNextChapter = hasChapter(chapterNumOf(pt.wiki) + 1)
-
-  // Serve cached prose if we already wrote it.
-  const cached = pt.wiki['recap.md']
-  if (cached?.body) {
-    res.json({ facts, hasNextChapter, title: String(cached.frontmatter?.title ?? ''), prose: cached.body })
-    return
-  }
-
   try {
-    const user = await store.getUserById(req.userId!)
-    const llm = resolveUserLlm(user)
-    const playerActions = pt.history.filter((t) => t.role === 'player').map((t) => t.content)
-    const { title, prose } = await generateRecapProse(facts, playerActions, llm)
+    await chapterEndLock.run(pt.id, async () => {
+      // Re-load inside the lock so we see state after any concurrent advance.
+      const fresh = await store.get(pt.id)
+      if (!fresh || fresh.userId !== req.userId) {
+        if (!res.headersSent) res.status(404).json({ error: 'No active game.' })
+        return
+      }
+      if (anchorOf(fresh.wiki) !== CHAPTER_END) {
+        if (!res.headersSent) res.status(409).json({ error: 'This chapter is not complete yet.' })
+        return
+      }
 
-    // Cache into the wiki (chapter is over; no further turns mutate it).
-    const wiki: WikiMap = { ...pt.wiki, 'recap.md': { frontmatter: { title }, body: prose } }
-    await store.save(pt.id, wiki, pt.history)
+      const user = await store.getUserById(req.userId!)
+      const result = await prepareChapterRecap(
+        fresh.wiki,
+        fresh.character,
+        fresh.history,
+        async (facts, playerActions) => {
+          return generateRecapProse(facts, playerActions, resolveUserLlm(user))
+        },
+      )
 
-    res.json({ facts, hasNextChapter, title, prose })
+      // Persist if the wiki changed (new archive entry and/or cache).
+      if (result.wiki !== fresh.wiki) {
+        await store.save(fresh.id, result.wiki, fresh.history)
+      }
+
+      res.json(result.recap)
+    })
   } catch (err) {
+    if (err instanceof RecapCorruptionError) {
+      console.error('[/api/recap] archive corruption:', err.message)
+      if (!res.headersSent) {
+        res.status(503).json({ error: 'Recap data is corrupted. Please try again.' })
+      }
+      return
+    }
     console.error('[/api/recap] error:', err)
-    res.status(503).json({ error: 'Could not write the recap. Please try again.' })
+    if (!res.headersSent) {
+      res.status(503).json({ error: 'Could not write the recap. Please try again.' })
+    }
   }
 })
 
 // Multi-chapter: advance a completed playthrough into the next chapter. Only valid once
-// the current chapter is at END. Runs consolidation (drop spent scratch, keep durable
-// state, seed the next chapter), appends the next chapter's opening as a fresh turn-0
-// message, and returns the new game state (same shape as /api/state). If there's no next
-// chapter, the story is fully complete — returns { complete: true }.
+// the current chapter is at END. Archives the completed chapter's recap before advancing
+// (or before returning {complete:true} for a final chapter). Runs under the chapter-end
+// lock to serialise with recap generation.
 app.post('/api/next-chapter', async (req, res) => {
   const id = req.cookies?.[PID_COOKIE]
   const pt = id ? await store.get(id) : null
@@ -605,44 +633,70 @@ app.post('/api/next-chapter', async (req, res) => {
     return
   }
 
-  const from = chapterNumOf(pt.wiki)
-  const to = from + 1
-  if (!hasChapter(to)) {
-    // No further chapters — the whole story is done. The frontend shows an end state.
-    res.json({ complete: true })
-    return
-  }
-
   try {
-    // Context Bounding Upgrade §3.2 — carry the outgoing chapter forward as a compact
-    // entry in chapter-log.md instead of raw turns. Reuse the cached recap if the player
-    // already viewed the recap screen (the normal flow); otherwise generate it fresh —
-    // same facts + prose the recap screen itself would show.
-    const facts = buildRecapFacts(pt.character as PlayableId, pt.wiki, pt.history)
-    let recapProse = pt.wiki['recap.md']?.body
-    if (!recapProse) {
+    await chapterEndLock.run(pt.id, async () => {
+      // Re-load inside the lock.
+      const fresh = await store.get(pt.id)
+      if (!fresh || fresh.userId !== req.userId) {
+        if (!res.headersSent) res.status(404).json({ error: 'No active game.' })
+        return
+      }
+      if (anchorOf(fresh.wiki) !== CHAPTER_END) {
+        if (!res.headersSent) res.status(409).json({ error: 'This chapter is not complete yet.' })
+        return
+      }
+
+      // Prepare recap (archives if this is the first completion; no-op archive hit
+      // on repeat). This ensures the archive is durably written before we decide
+      // whether to advance or declare the story complete.
       const user = await store.getUserById(req.userId!)
-      const playerActions = pt.history.filter((t) => t.role === 'player').map((t) => t.content)
-      recapProse = (await generateRecapProse(facts, playerActions, resolveUserLlm(user))).prose
-    }
+      const result = await prepareChapterRecap(
+        fresh.wiki,
+        fresh.character,
+        fresh.history,
+        async (facts, playerActions) => {
+          return generateRecapProse(facts, playerActions, resolveUserLlm(user))
+        },
+      )
 
-    const consolidated = consolidate(pt.wiki, from, to)
-    const wiki = appendChapterLog(consolidated, from, facts.chapterTitle, recapProse)
-    const opening = getChapter(to).openingFor(pt.character)
-    wiki['world-state.md'].frontmatter!.last_actions = opening.actions
-    // Context Bounding Upgrade §3.1 — the new chapter's window starts at the opening line
-    // below (pt.history.length, BEFORE it's appended), so the model still sees how the
-    // chapter opened on the very next turn instead of losing that context immediately.
-    wiki['world-state.md'].frontmatter!.chapter_history_start = pt.history.length
-    // Append the new chapter's opening as a fresh turn-0 AI message (mirrors /api/new-game,
-    // but keeps the prior chapters' history so the story log is continuous).
-    const history: Turn[] = [...pt.history, { role: 'ai', content: opening.prose }]
+      // Persist the archive + cache if this was the first completion.
+      if (result.wiki !== fresh.wiki) {
+        await store.save(fresh.id, result.wiki, fresh.history)
+      }
 
-    await store.save(pt.id, wiki, history)
-    res.json(statePayload(pt, wiki, history))
+      const currentChapter = chapterNumOf(result.wiki)
+
+      // Final chapter or no successor — story is complete. The archive was saved above.
+      if (!canAdvanceFrom(currentChapter)) {
+        res.json({ complete: true })
+        return
+      }
+
+      // Advance into the next chapter.
+      const from = currentChapter
+      const to = from + 1
+      const consolidated = consolidate(result.wiki, from, to)
+      const wiki = appendChapterLog(consolidated, from, result.recap.facts.chapterTitle, result.recap.prose)
+      const opening = getChapter(to).openingFor(fresh.character)
+      wiki['world-state.md'].frontmatter!.last_actions = opening.actions
+      wiki['world-state.md'].frontmatter!.chapter_history_start = fresh.history.length
+      const history: Turn[] = [...fresh.history, { role: 'ai', content: opening.prose }]
+
+      await store.save(fresh.id, wiki, history)
+      res.json(statePayload(fresh, wiki, history))
+    })
   } catch (err) {
+    if (err instanceof RecapCorruptionError) {
+      console.error('[/api/next-chapter] archive corruption:', err.message)
+      if (!res.headersSent) {
+        res.status(503).json({ error: 'Recap data is corrupted. Please try again.' })
+      }
+      return
+    }
     console.error('[/api/next-chapter] error:', err)
-    res.status(500).json({ error: 'Could not start the next chapter.' })
+    if (!res.headersSent) {
+      res.status(500).json({ error: 'Could not start the next chapter.' })
+    }
   }
 })
 

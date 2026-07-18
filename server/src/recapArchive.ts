@@ -43,6 +43,11 @@ export type ArchiveEntryStatus =
 
 export type ArchiveRow = {
   entry: ArchivedRecapEntry
+  /** Chapter number — always set, even for invalid rows where the raw data had a
+   *  parseable chapter number (so prepareChapterRecap can detect corrupt entries
+   *  for the current chapter). null only when the raw row was completely
+   *  unparseable. */
+  chapterNumber: number | null
   status: ArchiveEntryStatus
 }
 
@@ -164,31 +169,33 @@ export function readArchive(wiki: WikiMap): ArchiveRow[] {
   const seen = new Set<number>()
 
   for (const r of raw) {
+    const rawNum: number | null =
+      r && typeof r === 'object' && isSafePositiveInteger((r as any).chapterNumber)
+        ? (r as any).chapterNumber
+        : null
+
     const result = validateArchiveEntry(r)
     if (typeof result === 'string') {
-      rows.push({ entry: null as any, status: { valid: false, reason: result } })
-      // Try to extract a chapter number for the seen-set even from invalid rows
-      // so a corrupt row doesn't let a later duplicate slip through.
-      if (r && typeof r === 'object' && isSafePositiveInteger((r as any).chapterNumber)) {
-        seen.add((r as any).chapterNumber)
-      }
+      rows.push({ entry: null as any, chapterNumber: rawNum, status: { valid: false, reason: result } })
+      // Track chapter number for the seen-set even from invalid rows so a corrupt
+      // row doesn't let a later duplicate slip through.
+      if (rawNum !== null) seen.add(rawNum)
       continue
     }
 
     if (seen.has(result.chapterNumber)) {
-      rows.push({ entry: result, status: { valid: false, reason: `duplicate chapter ${result.chapterNumber}` } })
+      rows.push({ entry: result, chapterNumber: result.chapterNumber, status: { valid: false, reason: `duplicate chapter ${result.chapterNumber}` } })
       continue
     }
     seen.add(result.chapterNumber)
 
-    rows.push({ entry: result, status: { valid: true } })
+    rows.push({ entry: result, chapterNumber: result.chapterNumber, status: { valid: true } })
   }
 
-  // Sort by chapterNumber (even invalid rows if they have one, but they won't
-  // have an entry — the sort is stable for valid rows).
+  // Sort by chapterNumber (nulls sort last).
   return rows.sort((a, b) => {
-    const an = a.entry?.chapterNumber ?? 0
-    const bn = b.entry?.chapterNumber ?? 0
+    const an = a.chapterNumber ?? Number.MAX_SAFE_INTEGER
+    const bn = b.chapterNumber ?? Number.MAX_SAFE_INTEGER
     return an - bn
   })
 }
