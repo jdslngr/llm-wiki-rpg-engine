@@ -560,6 +560,56 @@ export default function AuthoringScreen({ onBack }: Props) {
               </button>
             </div>
 
+            {/* Final chapter — author declares this is the deliberate ending. */}
+            <div>
+              <label className="mb-2 flex items-center gap-2 cursor-pointer" style={fontBody}>
+                <input
+                  type="checkbox"
+                  checked={spec.isFinal === true}
+                  onChange={(e) => patchSpec({ isFinal: e.target.checked })}
+                  className="h-4 w-4 rounded-sm accent-[var(--color-gold)]"
+                />
+                <span className="text-sm text-text-primary">Mark as the final chapter of the story</span>
+              </label>
+              <p className="mb-3 text-xs text-text-dim ml-6" style={fontBody}>
+                Only an author-set flag closes the story. A chapter with no sequel authored yet
+                is not an ending — the recap will show "More chapters coming soon" until you
+                mark one final.
+              </p>
+
+              {spec.isFinal && (
+                <div className="ml-6 space-y-3 rounded-sm border p-3" style={{ borderColor: 'var(--color-gold-mid)' }}>
+                  <p className="text-xs text-text-dim" style={fontBody}>
+                    Both fields are optional and independent. Nothing is shown automatically —
+                    only what you write below appears on the recap screen. These are
+                    author-written closing text; the engine never generates "The End" copy.
+                  </p>
+                  <div>
+                    <label className={labelCls} style={fontLabel}>Epilogue</label>
+                    <textarea
+                      value={spec.epilogue ?? ''}
+                      onChange={(e) => patchSpec({ epilogue: e.target.value || undefined })}
+                      placeholder="Optional closing prose shown after the recap…"
+                      rows={4}
+                      className={inputCls}
+                      style={inputStyle}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelCls} style={fontLabel}>Acknowledgment</label>
+                    <textarea
+                      value={spec.acknowledgment ?? ''}
+                      onChange={(e) => patchSpec({ acknowledgment: e.target.value || undefined })}
+                      placeholder="Optional thank-you / credits note…"
+                      rows={3}
+                      className={inputCls}
+                      style={inputStyle}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+
             {/* Re-expand with notes */}
             <details className="rounded-sm border p-3" style={{ borderColor: 'var(--color-gold-mid)' }}>
               <summary className="cursor-pointer text-sm text-text-muted" style={fontBody}>Not quite right? Re-expand with notes</summary>

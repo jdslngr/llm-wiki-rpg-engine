@@ -152,7 +152,7 @@ let fixture: { userId: string; sessionToken: string; playthroughId: string }
 
 // Set up before each test. Closes the previous server if one exists.
 const setup = async () => {
-  if (server) { server.close(); server = null }
+  server?.close(); server = null
   store = createMemoryStore()
   fixture = await createTestFixture(store)
   app = createApp(store)
@@ -373,7 +373,7 @@ check('GET /api/recaps/1 does not mutate playthrough state', setupThen(async () 
   for (const test of tests) {
     await test()
   }
-  if (server) server.close()
+  ;(server as Server | null)?.close()
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`)
   if (failed > 0) process.exit(1)
 })()

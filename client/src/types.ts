@@ -58,6 +58,12 @@ export type ChapterSpec = {
   opening: { prose: string; actions: string[] }
   softLockThreshold?: number
   endState?: EndStateOp[]
+  /** Marks this as the final chapter of the whole story (default false). */
+  isFinal?: boolean
+  /** Optional closing prose, shown on the recap screen only when isFinal and non-empty. */
+  epilogue?: string
+  /** Optional thank-you/credits text, independent of epilogue. */
+  acknowledgment?: string
 }
 export type ChapterBrief = {
   number: number
@@ -94,7 +100,18 @@ export type RecapFacts = {
   turnCount: number
   notableFacts?: { file: string; facts: string[] }[]
 }
-export type RecapResponse = { facts: RecapFacts; hasNextChapter: boolean; title: string; prose: string }
+export type RecapResponse = {
+  facts: RecapFacts
+  hasNextChapter: boolean
+  title: string
+  prose: string
+  /** Author-declared final chapter. */
+  isFinal: boolean
+  /** Author-written closing prose (only present when isFinal and non-empty). */
+  epilogue?: string
+  /** Author-written thank-you/credits (only present when isFinal and non-empty). */
+  acknowledgment?: string
+}
 
 // The trailing "done" frame from the /api/play-turn NDJSON stream.
 export type DoneFrame = {

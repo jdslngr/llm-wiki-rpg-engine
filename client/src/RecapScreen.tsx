@@ -191,6 +191,37 @@ export default function RecapScreen({ onBackToSaves, onContinue }: Props) {
                 </div>
               </section>
             )}
+
+            {/* Author-written closing sections — only when the chapter is final AND the field is non-empty. */}
+            {data.isFinal && data.epilogue && (
+              <section className="mt-8">
+                <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-muted" style={fontBody}>
+                  Epilogue
+                </h3>
+                <div className="space-y-4 text-[15px] leading-relaxed text-text-body sm:text-base">
+                  {data.epilogue.split(/\n{2,}/).map((para, i) => (
+                    <p key={i} className="whitespace-pre-wrap" style={fontBody}>
+                      {para.trim()}
+                    </p>
+                  ))}
+                </div>
+              </section>
+            )}
+
+            {data.isFinal && data.acknowledgment && (
+              <section className="mt-8">
+                <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-text-muted" style={fontBody}>
+                  Acknowledgment
+                </h3>
+                <div className="space-y-4 text-[14px] leading-relaxed text-text-dim sm:text-[15px]">
+                  {data.acknowledgment.split(/\n{2,}/).map((para, i) => (
+                    <p key={i} className="whitespace-pre-wrap" style={fontBody}>
+                      {para.trim()}
+                    </p>
+                  ))}
+                </div>
+              </section>
+            )}
           </>
         ) : null}
       </div>
@@ -247,7 +278,9 @@ export default function RecapScreen({ onBackToSaves, onContinue }: Props) {
               >
                 Back to Your Stories
               </button>
-              <p className="mt-2 text-center text-xs text-text-dim" style={fontBody}>More chapters coming soon</p>
+              {!data?.isFinal && (
+                <p className="mt-2 text-center text-xs text-text-dim" style={fontBody}>More chapters coming soon</p>
+              )}
             </>
           )}
         </div>
