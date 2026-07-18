@@ -156,8 +156,8 @@ Do NOT use for:
 - Flags, numbers, or status — those go in wiki_updates
 
 Each fact: ≤30 words, specific, and non-obvious. Pick the right target file (the character
-it's about, or world-state.md for plot/world facts) — never chapter-log.md or recap.md,
-which don't accept facts. Empty array if nothing new worth remembering this turn.
+it's about, or world-state.md for plot/world facts) — never chapter-log.md, recap.md, or
+recap-history.md, which don't accept facts. Empty array if nothing new worth remembering this turn.
 
 UNIVERSAL GUARDRAILS (chapter-specific guardrails are supplied separately)
 - Never use present-day names for places e.g. Panay etc.

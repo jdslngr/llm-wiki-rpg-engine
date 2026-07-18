@@ -43,8 +43,9 @@ function sanitizeWikiUpdateValue(v: unknown): unknown {
 // recap.md is never rendered into the prompt at all (renderWiki skips it); chapter-log.md
 // gets its `frontmatter` unconditionally reset to {} on every chapter transition
 // (consolidate.ts's appendChapterLog ~L58-61) — any facts stored there would be silently
-// wiped at the next chapter boundary. Both are pointless or unsafe targets — refuse upfront.
-const FACTS_EXCLUDED_FILES = new Set(['recap.md', 'chapter-log.md'])
+// wiped at the next chapter boundary. recap-history.md is the immutable archive — the model
+// must never read or write it. All three are protected from every model write path.
+const AI_WRITE_EXCLUDED_FILES = new Set(['recap.md', 'recap-history.md', 'chapter-log.md'])
 
 /** Normalize for dedup comparison ONLY — facts are stored verbatim. */
 function normalizeForDedup(s: string): string {
@@ -103,6 +104,9 @@ function applyWikiUpdates(
     // `facts` is owned by applyFactAdditions' append-only path — a scalar write
     // through wiki_updates here would silently wipe the array.
     if (u.field === 'facts') continue
+    // Don't let the AI invent or mutate protected files (recap.md, recap-history.md,
+    // chapter-log.md) — these are engine-managed.
+    if (AI_WRITE_EXCLUDED_FILES.has(u.file)) continue
     // Don't let the AI invent files; only edit ones that already exist.
     const file = next[u.file]
     if (!file) continue
@@ -127,7 +131,7 @@ function applyFactAdditions(wiki: WikiMap, additions: FactAddition[]): WikiMap {
   const next: WikiMap = structuredClone(wiki)
   for (const a of additions) {
     if (!a || typeof a.file !== 'string' || typeof a.text !== 'string') continue
-    if (FACTS_EXCLUDED_FILES.has(a.file)) continue
+    if (AI_WRITE_EXCLUDED_FILES.has(a.file)) continue
     // Collapse all internal whitespace (incl. newlines) so a fact never breaks the
     // rendered bullet list (§3.7) and the word count below isn't skewed by stray newlines.
     const text = a.text.trim().replace(/\s+/g, ' ')

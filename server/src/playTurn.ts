@@ -63,7 +63,7 @@ const HIDDEN_FIELDS = new Set([
 function renderWiki(wiki: WikiMap): string {
   const parts: string[] = []
   for (const [name, file] of Object.entries(wiki ?? {})) {
-    if (name === 'recap.md') continue // meta, never part of the game prompt
+    if (name === 'recap.md' || name === 'recap-history.md') continue // meta, never part of the game prompt
 
     const fm = file.frontmatter ?? {}
     const entries = Object.entries(fm).filter(([k]) => !HIDDEN_FIELDS.has(k) && k !== 'facts')
