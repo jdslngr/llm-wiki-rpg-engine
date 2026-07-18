@@ -631,6 +631,13 @@ class PgStore implements PlaythroughStore {
 // --- Factory ----------------------------------------------------------------
 // Postgres when DATABASE_URL is set AND reachable; otherwise in-memory. A bad/absent
 // DB never crashes the app — it just falls back so the game still runs.
+
+/** Create a standalone in-memory store. Exported for tests that need an isolated
+ *  store without touching DATABASE_URL or Postgres. */
+export function createMemoryStore(): PlaythroughStore {
+  return new MemStore()
+}
+
 export async function createStore(): Promise<PlaythroughStore> {
   const url = process.env.DATABASE_URL
   if (!url) {

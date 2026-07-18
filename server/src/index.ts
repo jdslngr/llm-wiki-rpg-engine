@@ -31,6 +31,7 @@ import {
 import { expandChapterSpec, type ChapterBrief } from './expandChapter.js'
 import { ChapterEndLock } from './chapterEndLock.js'
 import { prepareChapterRecap, type RecapSnapshot, RecapCorruptionError } from './recapPreparation.js'
+import { recapHistoryRoutes } from './recapHistoryRoutes.js'
 import type { Playthrough, Turn, WikiMap, UserSettingsUpdate } from './types.js'
 
 // The store is chosen at boot: Postgres if DATABASE_URL is reachable, else in-memory.
@@ -323,6 +324,9 @@ app.post('/api/auth/login', authRateLimit, async (req, res) => {
 
 // ── Auth wall: all routes below require a valid session ───────────────────
 app.use('/api', requireAuth(store))
+
+// --- Recap history routes (protected, read-only) ----------------------------
+app.use('/api/recaps', recapHistoryRoutes(store))
 
 // --- Auth routes (protected) ------------------------------------------------
 
