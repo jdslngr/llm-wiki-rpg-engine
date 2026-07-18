@@ -47,4 +47,14 @@ export interface Chapter {
   openingFor(characterId: string): { prose: string; actions: string[] }
   /** Optional: durable writes to apply when this chapter ENDS (semantic state, thread flags). */
   endState?: (wiki: WikiMap) => void
+
+  /** Author-declared final chapter — this is the deliberate ending of the story
+   *  (default false; a missing successor alone is not an ending). */
+  isFinal: boolean
+  /** Optional author-written closing prose, shown on the recap screen only when
+   *  isFinal and non-empty. Independent of acknowledgment. */
+  epilogue?: string
+  /** Optional author-written thank-you / credits text, shown on the recap screen
+   *  only when isFinal and non-empty. Independent of epilogue. */
+  acknowledgment?: string
 }

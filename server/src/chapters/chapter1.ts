@@ -339,6 +339,7 @@ export const CHAPTER_1: Chapter = {
   openingFor: (characterId: string) =>
     openingForCharacter(characterId as PlayableId),
   softLockThreshold: 5,
+  isFinal: false,
   // Durable semantic state to carry forward when Chapter 1 ends: the vow was made.
   // (Persists across the transition; scratch condition fields are cleared instead.)
   endState: (wiki) => {

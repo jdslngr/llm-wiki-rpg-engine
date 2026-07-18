@@ -31,6 +31,13 @@ export type ChapterSpec = {
   softLockThreshold?: number
   /** Durable facts to write into the wiki when this chapter ends. */
   endState?: EndStateOp[]
+  /** Marks this as the final chapter of the whole story (default false — an ordinary chapter
+   *  with no sequel authored yet is NOT final; the author opts in explicitly). */
+  isFinal?: boolean
+  /** Optional closing prose, shown on the recap screen only when isFinal and non-empty. */
+  epilogue?: string
+  /** Optional thank-you/credits text, independent of epilogue — shown under the same rule. */
+  acknowledgment?: string
 }
 
 const asArray = (v: unknown): unknown[] => (Array.isArray(v) ? v : [])
@@ -150,6 +157,12 @@ player a natural opening to: ${opts.nudge}. Let a crew member or the world invit
     return `ACTIVE ANCHOR\n${notes}${transition}${nudge}`
   }
 
+  // Blank string → "not written", so an empty textarea never renders an empty section.
+  // Only trim after confirming the value is a string (sanity check #1: malformed input
+  // like {epilogue: 42} must not throw here — it's caught by validateChapterSpec).
+  const epilogue = typeof spec.epilogue === 'string' ? spec.epilogue.trim() || undefined : undefined
+  const acknowledgment = typeof spec.acknowledgment === 'string' ? spec.acknowledgment.trim() || undefined : undefined
+
   return {
     number: spec.number,
     title: spec.title,
@@ -170,6 +183,9 @@ player a natural opening to: ${opts.nudge}. Let a crew member or the world invit
     openingFor: () => ({ prose: spec.opening.prose, actions: spec.opening.actions }),
     softLockThreshold: spec.softLockThreshold ?? 5,
     endState: spec.endState?.length ? (wiki) => applyEndStateOps(spec.endState!, wiki) : undefined,
+    isFinal: spec.isFinal === true,
+    epilogue,
+    acknowledgment,
   }
 }
 
@@ -295,6 +311,17 @@ export function validateChapterSpec(
         problems.push(`Anchor "${a.id}" uses unknown condition op "${(c as Clause).op}".`)
       }
     }
+  }
+
+  // Validate final-chapter fields (sanity check #1: treat persisted data as untrusted).
+  if (s.isFinal !== undefined && typeof s.isFinal !== 'boolean') {
+    problems.push('"isFinal" must be a boolean if present.')
+  }
+  if (s.epilogue !== undefined && typeof s.epilogue !== 'string') {
+    problems.push('"epilogue" must be a string if present.')
+  }
+  if (s.acknowledgment !== undefined && typeof s.acknowledgment !== 'string') {
+    problems.push('"acknowledgment" must be a string if present.')
   }
 
   const op = s as { opening?: ChapterSpec['opening'] }

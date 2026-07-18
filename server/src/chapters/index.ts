@@ -29,6 +29,14 @@ export function lastChapter(): number {
   return Math.max(...cache.keys())
 }
 
+/** Whether the story can advance past chapter `n`. False when n is a declared final
+ *  chapter OR when chapter n+1 simply isn't registered yet. This is the single
+ *  authority for hasNextChapter — the recap route reads it instead of inferring
+ *  finality from a missing successor. */
+export function canAdvanceFrom(n: number): boolean {
+  return !getChapter(n).isFinal && hasChapter(n + 1)
+}
+
 /** Register (or replace) an authored chapter from its spec. Built-in numbers are protected. */
 export function registerSpec(spec: ChapterSpec): void {
   if (spec.number in BUILTINS) {
