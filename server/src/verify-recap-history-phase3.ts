@@ -351,6 +351,76 @@ check('run() releases on error', async () => {
   release()
 })
 
+check('regression: C cannot enter while B holds the lock after being woken', async () => {
+  // This reproduces the A/B/C timing race where the original implementation
+  // deleted the map entry before waking a successor, letting a third request
+  // see no queue and enter concurrently with the just-woken holder.
+  const lock = new ChapterEndLock()
+  let active = 0
+  let maxObserved = 0
+
+  let unblockB!: () => void
+  const bBlocked = new Promise<void>((r) => { unblockB = r })
+  let bStarted = false
+  let cEntered = false
+
+  // A acquires first.
+  const releaseA = await lock.acquire('pid')
+  active++
+  maxObserved = Math.max(maxObserved, active)
+
+  // Queue B — its critical section will block on a test-controlled promise.
+  const bDone = lock.acquire('pid').then(async (releaseB) => {
+    bStarted = true
+    active++
+    maxObserved = Math.max(maxObserved, active)
+    // Block until the test says go.
+    await bBlocked
+    active--
+    releaseB()
+  })
+
+  // Release A, which wakes B.
+  active--
+  releaseA()
+
+  // Wait for B to enter its critical section (time-bounded poll).
+  const start = Date.now()
+  while (!bStarted) {
+    if (Date.now() - start > 1000) throw new Error('B never started after A released')
+    await new Promise((r) => setTimeout(r, 5))
+  }
+  assert(active === 1, `expected 1 active (B), got ${active}`)
+
+  // While B is blocked, try to acquire C. It must NOT succeed.
+  const cDone = lock.acquire('pid').then((releaseC) => {
+    cEntered = true
+    active++
+    maxObserved = Math.max(maxObserved, active)
+    active--
+    releaseC()
+  })
+
+  // Give C a fair window to (incorrectly) enter.
+  await new Promise((r) => setTimeout(r, 100))
+  assert(!cEntered, 'C must not enter while B holds the lock')
+  assert(maxObserved <= 1, `max concurrent holders: ${maxObserved}, expected ≤ 1`)
+
+  // Unblock B so it can finish and wake C.
+  unblockB()
+  await bDone
+
+  // Now C must eventually acquire (time-bounded poll).
+  const cStart = Date.now()
+  while (!cEntered) {
+    if (Date.now() - cStart > 1000) throw new Error('C never acquired after B released')
+    await new Promise((r) => setTimeout(r, 5))
+  }
+  await cDone
+
+  assert(maxObserved <= 1, `max concurrent holders: ${maxObserved}, expected ≤ 1`)
+})
+
 // ---------------------------------------------------------------------------
 // §5 — wikiStateOf exclusion (sanity check #3)
 // ---------------------------------------------------------------------------

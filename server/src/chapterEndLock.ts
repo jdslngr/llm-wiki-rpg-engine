@@ -16,9 +16,10 @@ type Release = () => void
  * callers queue in order. Release is guaranteed to wake the next waiter.
  */
 export class ChapterEndLock {
-  // For each key, an ordered list of wakeup callbacks. The first entry in the
-  // list is the CURRENT holder; the rest are waiting. When the list is empty
-  // the key is removed from the map.
+  // For each key, an ordered list of wakeup callbacks. When the list is empty
+  // the key tracks the current holder; when non-empty the first entry is the
+  // holder and the rest are waiting. The key is removed from the map only when
+  // a holder releases and has no successor — never before waking a successor.
   private queues = new Map<string, (() => void)[]>()
 
   /** Acquire the lock for `pid`. Resolves to a release function. Always
@@ -34,13 +35,16 @@ export class ChapterEndLock {
           released = true
           const q = this.queues.get(pid)
           if (!q) return
-          // The first entry in the queue is the next waiter (if any).
-          // Shift-and-call it so the queue shrinks by one.
+          // Shift the next waiter (if any). Wake it while retaining the map
+          // entry — deleting before the successor runs lets a third request
+          // see no queue and enter concurrently. Only clean up when there is
+          // no successor.
           const next = q.shift()
-          if (q.length === 0) {
+          if (next) {
+            next() // wake the next holder — map entry stays
+          } else {
             this.queues.delete(pid)
           }
-          if (next) next() // wake the next holder
         }
       }
 
