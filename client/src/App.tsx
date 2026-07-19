@@ -7,11 +7,12 @@ import CharacterSelectScreen from './CharacterSelectScreen'
 import GameScreen from './GameScreen'
 import SettingsScreen from './SettingsScreen'
 import RecapScreen from './RecapScreen'
+import RecapHistoryScreen from './RecapHistoryScreen'
 import AuthoringScreen from './AuthoringScreen'
 import ArtAdminScreen from './ArtAdminScreen'
 import ChapterArtScreen from './ChapterArtScreen'
 
-type Screen = 'booting' | 'login' | 'signup' | 'saves' | 'select' | 'settings' | 'game' | 'recap' | 'authoring' | 'artAdmin' | 'chapterArt'
+type Screen = 'booting' | 'login' | 'signup' | 'saves' | 'select' | 'settings' | 'game' | 'recap' | 'recapHistory' | 'authoring' | 'artAdmin' | 'chapterArt'
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('booting')
@@ -109,6 +110,10 @@ export default function App() {
     setScreen('chapterArt')
   }
 
+  function handleRecapHistory() {
+    setScreen('recapHistory')
+  }
+
   // ── Render ─────────────────────────────────────────────────────────────────
 
   if (screen === 'booting') {
@@ -168,6 +173,10 @@ export default function App() {
     )
   }
 
+  if (screen === 'recapHistory') {
+    return <RecapHistoryScreen onResume={handleResume} />
+  }
+
   // screen === 'game'
   if (gameState) {
     return (
@@ -177,6 +186,7 @@ export default function App() {
         onSettings={handleGoToSettings}
         onChapterComplete={handleChapterComplete}
         onBackToSaves={() => setScreen('saves')}
+        onRecapHistory={handleRecapHistory}
       />
     )
   }

@@ -113,6 +113,41 @@ export type RecapResponse = {
   acknowledgment?: string
 }
 
+// Phase 6: recap-history API (GET /api/recaps, GET /api/recaps/:n).
+export type RecapSummary = {
+  chapterNumber: number
+  chapterTitle: string
+  title: string
+  isFinal: boolean
+  createdAt: string
+  legacy?: true
+}
+
+export type RecapListResponse = {
+  recaps: RecapSummary[]
+}
+
+/** Full detail entry from the recap-history API. Archive entries carry facts,
+ *  finality, and closing fields; legacy entries carry only prose + chapter
+ *  metadata and the legacy flag. */
+export type RecapDetailEntry = {
+  chapterNumber: number
+  chapterTitle: string
+  title: string
+  prose: string
+  facts?: RecapFacts
+  isFinal: boolean
+  epilogue?: string
+  acknowledgment?: string
+  createdAt: string
+  legacy?: true
+}
+
+export type RecapDetailResponse = {
+  recap: RecapDetailEntry
+  legacy: boolean
+}
+
 // The trailing "done" frame from the /api/play-turn NDJSON stream.
 export type DoneFrame = {
   type: 'done'

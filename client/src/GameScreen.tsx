@@ -22,9 +22,10 @@ interface Props {
   onSettings?: () => void
   onChapterComplete?: () => void
   onBackToSaves?: () => void
+  onRecapHistory?: () => void
 }
 
-export default function GameScreen({ initialState, onLogout, onSettings, onChapterComplete, onBackToSaves }: Props) {
+export default function GameScreen({ initialState, onLogout, onSettings, onChapterComplete, onBackToSaves, onRecapHistory }: Props) {
   // The playthrough's character is fixed once loaded — to switch, return to Your
   // Stories and start/resume a different one (no in-game restart).
   const [character] = useState<Dossier | null>(initialState.character)
@@ -476,6 +477,15 @@ export default function GameScreen({ initialState, onLogout, onSettings, onChapt
                 >
                   ⤓ Export
                 </button>
+                {onRecapHistory && (
+                  <button
+                    onClick={() => { onRecapHistory(); setNavMenuOpen(false) }}
+                    className="min-h-11 w-full flex items-center whitespace-nowrap px-4 text-xs text-gold-text hover:opacity-80 transition"
+                    style={{ fontFamily: "'Lora', Georgia, serif", letterSpacing: '0.02em' }}
+                  >
+                    📜 Recap History
+                  </button>
+                )}
                 {onBackToSaves && (
                   <button
                     onClick={() => { onBackToSaves(); setNavMenuOpen(false) }}
