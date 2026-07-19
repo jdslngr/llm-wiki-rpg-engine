@@ -64,7 +64,7 @@ function makeArchiveEntry(chapterNumber: number, overrides: Partial<ArchivedReca
     chapterTitle: `Chapter ${chapterNumber}`,
     title: `Recap Title ${chapterNumber}`,
     prose: `Recap prose for chapter ${chapterNumber}.`,
-    facts: { ...MINIMAL_FACTS, chapterNumber },
+    facts: { ...MINIMAL_FACTS, chapterNumber, chapterTitle: `Chapter ${chapterNumber}` },
     isFinal: false,
     createdAt: new Date().toISOString(),
     ...overrides,
@@ -247,7 +247,7 @@ check('GET /api/recaps/1 returns exact archive entry', setupThen(async () => {
   assert(body?.recap?.chapterNumber === 1, 'chapter number')
   assert(body?.recap?.title === 'Recap Title 1', 'title')
   assert(body?.recap?.prose === 'Recap prose for chapter 1.', 'prose')
-  assert(body?.recap?.facts?.chapterTitle === 'Test Chapter', 'facts chapterTitle')
+  assert(body?.recap?.facts?.chapterTitle === 'Chapter 1', 'facts chapterTitle')
   assert(body?.recap?.isFinal === false, 'isFinal')
   assert(typeof body?.recap?.createdAt === 'string', 'createdAt')
 }))

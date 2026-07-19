@@ -7,11 +7,13 @@
 
 import {
   validateArchiveEntry,
+  isValidRecapFacts,
   readArchive,
   validEntries,
   appendArchivedRecap,
   parseLegacyChapterLog,
   mergeArchiveAndLegacy,
+  archiveEnvelopeError,
   ARCHIVE_FILE,
   type ArchivedRecapEntry,
 } from './recapArchive.js'
@@ -467,6 +469,235 @@ check('fact_addition to normal file still works', () => {
   const result = runWriteBack(wiki, [], [], [{ file: 'kaspen.md', text: 'Kaspen is suspicious' }])
   const facts = result.wiki['kaspen.md']?.frontmatter?.facts as string[] | undefined
   assert(Array.isArray(facts) && facts.some((f) => f.includes('suspicious')), 'normal fact addition works')
+})
+
+// ---------------------------------------------------------------------------
+// §7 — Facts validation hardening (Phase 7: crew trust/arc, journey, notableFacts)
+// ---------------------------------------------------------------------------
+console.log('\n§7 — Facts validation hardening')
+
+check('rejects crew row with missing trust', () => {
+  const badFacts = { ...MINIMAL_FACTS, crew: [{ id: 'kaelen', name: 'Kaelen', arc: 'open' }] }
+  assert(!isValidRecapFacts(badFacts), 'crew missing trust must be rejected')
+})
+
+check('rejects crew row with non-numeric trust', () => {
+  const badFacts = { ...MINIMAL_FACTS, crew: [{ id: 'kaelen', name: 'Kaelen', trust: 'high' as any, arc: 'open' }] }
+  assert(!isValidRecapFacts(badFacts), 'non-numeric trust must be rejected')
+})
+
+check('rejects crew row with non-finite trust (NaN)', () => {
+  const badFacts = { ...MINIMAL_FACTS, crew: [{ id: 'kaelen', name: 'Kaelen', trust: NaN, arc: 'open' }] }
+  assert(!isValidRecapFacts(badFacts), 'NaN trust must be rejected')
+})
+
+check('rejects crew row with infinite trust', () => {
+  const badFacts = { ...MINIMAL_FACTS, crew: [{ id: 'kaelen', name: 'Kaelen', trust: Infinity, arc: 'open' }] }
+  assert(!isValidRecapFacts(badFacts), 'infinite trust must be rejected')
+})
+
+check('rejects crew row with missing arc', () => {
+  const badFacts = { ...MINIMAL_FACTS, crew: [{ id: 'kaelen', name: 'Kaelen', trust: 50 }] }
+  assert(!isValidRecapFacts(badFacts), 'crew missing arc must be rejected')
+})
+
+check('rejects journey with missing zonesVisited', () => {
+  const badFacts = { ...MINIMAL_FACTS, journey: { crewSpoken: [], shipAreasExplored: [], petInteracted: false } }
+  assert(!isValidRecapFacts(badFacts), 'missing zonesVisited must be rejected')
+})
+
+check('rejects journey with wrong-type crewSpoken (not an array)', () => {
+  const badFacts = { ...MINIMAL_FACTS, journey: { zonesVisited: [], crewSpoken: 'nope' as any, shipAreasExplored: [], petInteracted: false } }
+  assert(!isValidRecapFacts(badFacts), 'wrong-type crewSpoken must be rejected')
+})
+
+check('rejects journey with non-boolean petInteracted', () => {
+  const badFacts = { ...MINIMAL_FACTS, journey: { zonesVisited: [], crewSpoken: [], shipAreasExplored: [], petInteracted: 'yes' as any } }
+  assert(!isValidRecapFacts(badFacts), 'non-boolean petInteracted must be rejected')
+})
+
+check('rejects notableFacts with empty file string', () => {
+  const badFacts = { ...MINIMAL_FACTS, notableFacts: [{ file: '  ', facts: ['a fact'] }] }
+  assert(!isValidRecapFacts(badFacts), 'blank file in notableFacts must be rejected')
+})
+
+check('rejects notableFacts with blank fact string', () => {
+  const badFacts = { ...MINIMAL_FACTS, notableFacts: [{ file: 'test.md', facts: ['  '] }] }
+  assert(!isValidRecapFacts(badFacts), 'blank fact string must be rejected')
+})
+
+check('rejects notableFacts with a non-string fact', () => {
+  const badFacts = { ...MINIMAL_FACTS, notableFacts: [{ file: 'test.md', facts: [42 as any] }] }
+  assert(!isValidRecapFacts(badFacts), 'non-string fact must be rejected')
+})
+
+check('rejects notableFacts that is not an array', () => {
+  const badFacts = { ...MINIMAL_FACTS, notableFacts: 'nope' as any }
+  assert(!isValidRecapFacts(badFacts), 'non-array notableFacts must be rejected')
+})
+
+check('accepts valid notableFacts', () => {
+  const goodFacts = { ...MINIMAL_FACTS, notableFacts: [{ file: 'kaspen.md', facts: ['Kaspen trusts the crew.'] }] }
+  assert(isValidRecapFacts(goodFacts), 'valid notableFacts must pass')
+})
+
+check('accepts facts with undefined notableFacts (optional field)', () => {
+  const goodFacts = { ...MINIMAL_FACTS }
+  delete (goodFacts as any).notableFacts
+  assert(isValidRecapFacts(goodFacts), 'missing notableFacts must pass (optional)')
+})
+
+// Cross-checks in validateArchiveEntry.
+check('rejects entry where facts.chapterNumber ≠ entry chapterNumber', () => {
+  const mismatched = makeEntry({ chapterNumber: 2, facts: { ...MINIMAL_FACTS, chapterNumber: 1 } })
+  const result = validateArchiveEntry(mismatched)
+  assert(typeof result === 'string' && result.includes('does not match'), `expected cross-check rejection, got: ${result}`)
+})
+
+check('rejects entry where facts.chapterTitle ≠ entry chapterTitle', () => {
+  const mismatched = makeEntry({ chapterNumber: 1, chapterTitle: 'Real Title', facts: { ...MINIMAL_FACTS, chapterNumber: 1, chapterTitle: 'Wrong Title' } })
+  const result = validateArchiveEntry(mismatched)
+  assert(typeof result === 'string' && result.includes('chapterTitle'), `expected chapterTitle mismatch rejection, got: ${result}`)
+})
+
+check('invalid crew row is omitted from validEntries', () => {
+  let wiki = emptyWiki()
+  wiki = appendArchivedRecap(wiki, makeEntry({ chapterNumber: 1 }))
+  // Manually add an entry with bad facts to the raw entries.
+  const clone = structuredClone(wiki)
+  const entries = clone[ARCHIVE_FILE]!.frontmatter!.entries as unknown[]
+  const badCrew = { ...MINIMAL_FACTS, crew: [{ id: 'x', name: 'X', trust: 'bad' }] }
+  entries.push({ ...makeEntry({ chapterNumber: 2 }), facts: badCrew })
+  wiki = clone
+  const valid = validEntries(wiki)
+  assert(valid.length === 1, `expected 1 valid, got ${valid.length}`)
+  assert(valid[0].chapterNumber === 1, 'only ch1 should be valid')
+})
+
+// ---------------------------------------------------------------------------
+// §8 — Envelope versioning
+// ---------------------------------------------------------------------------
+console.log('\n§8 — Envelope versioning')
+
+check('unversioned (v0) archive reads successfully', () => {
+  const wiki = emptyWiki()
+  // Manually create an unversioned archive.
+  const entry = makeEntry({ chapterNumber: 1 })
+  wiki[ARCHIVE_FILE] = {
+    frontmatter: { entries: [entry] },
+    body: '',
+  }
+  const rows = readArchive(wiki)
+  assert(rows.length === 1, `expected 1 row, got ${rows.length}`)
+  assert(rows[0].status.valid === true, 'entry must be valid')
+  assert(rows[0].entry.chapterNumber === 1, 'chapter 1 preserved')
+})
+
+check('append to v0 archive upgrades envelope to v1', () => {
+  let wiki = emptyWiki()
+  // Start with an unversioned archive (v0).
+  wiki[ARCHIVE_FILE] = {
+    frontmatter: { entries: [makeEntry({ chapterNumber: 1 })] },
+    body: '',
+  }
+  // Append a new chapter.
+  wiki = appendArchivedRecap(wiki, makeEntry({ chapterNumber: 2 }))
+  // Check the envelope is now v1.
+  const fm = wiki[ARCHIVE_FILE]!.frontmatter!
+  assert(fm.version === 1, `expected version 1, got ${String(fm.version)}`)
+  assert(Array.isArray(fm.entries), 'entries still present')
+  const nums = (fm.entries as any[]).map((e: any) => e.chapterNumber).sort()
+  assert(nums[0] === 1 && nums[1] === 2, `expected [1,2], got ${JSON.stringify(nums)}`)
+})
+
+check('v0→v1 upgrade preserves invalid old raw entries', () => {
+  let wiki = emptyWiki()
+  const validEntry = makeEntry({ chapterNumber: 1 })
+  const badRaw = { chapterNumber: 'nope' }
+  wiki[ARCHIVE_FILE] = {
+    frontmatter: { entries: [validEntry, badRaw] },
+    body: '',
+  }
+  wiki = appendArchivedRecap(wiki, makeEntry({ chapterNumber: 2 }))
+  const fm = wiki[ARCHIVE_FILE]!.frontmatter!
+  assert(fm.version === 1, 'upgraded to v1')
+  const raw = fm.entries as unknown[]
+  assert(raw.length === 3, `expected 3 raw entries (valid + bad + new), got ${raw.length}`)
+  // The bad entry must still be in the raw array.
+  assert(raw.some((e: any) => e?.chapterNumber === 'nope'), 'bad raw entry preserved')
+})
+
+check('v1 archive reads successfully', () => {
+  let wiki = emptyWiki()
+  wiki = appendArchivedRecap(wiki, makeEntry({ chapterNumber: 1 }))
+  wiki = appendArchivedRecap(wiki, makeEntry({ chapterNumber: 2 }))
+  const rows = readArchive(wiki)
+  assert(rows.length === 2, `expected 2, got ${rows.length}`)
+  const fm = wiki[ARCHIVE_FILE]!.frontmatter!
+  assert(fm.version === 1, 'version field present')
+})
+
+check('declared version 99 is corrupt (not empty archive)', () => {
+  const wiki = emptyWiki()
+  wiki[ARCHIVE_FILE] = {
+    frontmatter: { version: 99, entries: [makeEntry({ chapterNumber: 1 })] },
+    body: '',
+  }
+  const err = archiveEnvelopeError(wiki)
+  assert(err !== null, 'version 99 must be corrupt')
+  assert(err!.includes('99'), `error must mention version, got: ${err}`)
+  // readArchive must return empty (not treat it as valid data).
+  const rows = readArchive(wiki)
+  assert(rows.length === 0, 'corrupt envelope must produce no rows')
+})
+
+check('declared version "1" (string) is corrupt', () => {
+  const wiki = emptyWiki()
+  wiki[ARCHIVE_FILE] = {
+    frontmatter: { version: '1', entries: [makeEntry({ chapterNumber: 1 })] },
+    body: '',
+  }
+  const err = archiveEnvelopeError(wiki)
+  assert(err !== null, 'string version must be corrupt')
+  assert(err!.includes('1'), `error must mention version, got: ${err}`)
+})
+
+check('no archive file → archiveEnvelopeError returns null', () => {
+  const wiki = emptyWiki()
+  assert(archiveEnvelopeError(wiki) === null, 'no archive is not an error')
+})
+
+check('frontmatter with non-array entries is corrupt', () => {
+  const wiki = emptyWiki()
+  wiki[ARCHIVE_FILE] = {
+    frontmatter: { version: 1, entries: 'not-an-array' },
+    body: '',
+  }
+  const err = archiveEnvelopeError(wiki)
+  assert(err !== null, 'non-array entries must be corrupt')
+})
+
+// ---------------------------------------------------------------------------
+// §9 — Deep-clone isolation
+// ---------------------------------------------------------------------------
+console.log('\n§9 — Deep-clone isolation')
+
+check('appending ch2 then mutating nested ch1 field does not change original wiki', () => {
+  const wiki1 = emptyWiki()
+  const wiki2 = appendArchivedRecap(wiki1, makeEntry({ chapterNumber: 1, title: 'First Chapter' }))
+  const wiki3 = appendArchivedRecap(wiki2, makeEntry({ chapterNumber: 2, title: 'Second Chapter' }))
+
+  // Mutate a nested field in the returned wiki's ch1 entry.
+  const entries = wiki3[ARCHIVE_FILE]!.frontmatter!.entries as any[]
+  const ch1InWiki3 = entries.find((e: any) => e.chapterNumber === 1)
+  ch1InWiki3.title = 'HACKED'
+  ch1InWiki3.facts.chapterTitle = 'HACKED TOO'
+
+  // The original wiki2 (which only had ch1) must be unchanged.
+  const origEntries = wiki2[ARCHIVE_FILE]!.frontmatter!.entries as any[]
+  const ch1InOrig = origEntries.find((e: any) => e.chapterNumber === 1)
+  assert(ch1InOrig.title === 'First Chapter', `original title must be unchanged, got "${ch1InOrig.title}"`)
+  assert(ch1InOrig.facts.chapterTitle === 'Test Chapter', `original facts title must be unchanged, got "${ch1InOrig.facts.chapterTitle}"`)
 })
 
 // ---------------------------------------------------------------------------

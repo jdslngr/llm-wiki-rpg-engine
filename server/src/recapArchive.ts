@@ -4,8 +4,13 @@
 // edits cannot change historical recap data. The archive wins over any legacy
 // prose-only chapter-log.md entry for the same chapter number.
 //
+// Archive envelope (Phase 7 hardening):
+//   v0 — legacy unversioned:  { entries: [...] }
+//   v1 — current:             { version: 1, entries: [...] }
+//
 // Exports:
 //   - Type guards and validation for raw archive rows
+//   - archiveEnvelopeError(wiki) → corruption check before readArchive
 //   - readArchive(wiki) → sorted entries with per-entry status
 //   - appendArchivedRecap(wiki, entry) → validated, dedup'd, sorted new wiki
 //   - parseLegacyChapterLog(wiki) → prose-only entries from chapter-log.md
@@ -64,11 +69,66 @@ export type RecapSummary = {
 
 export const ARCHIVE_FILE = 'recap-history.md'
 const ENTRIES_KEY = 'entries'
+const VERSION_KEY = 'version'
+const CURRENT_VERSION = 1
+
+// ── Envelope ─────────────────────────────────────────────────────────────────
+
+type ArchiveEnvelope =
+  | { ok: true; version: 0 | 1; entries: unknown[] }
+  | { ok: false; reason: string }
+
+/** Central parser for the archive file envelope. Both readArchive and
+ *  appendArchivedRecap use this to make the same version decision. */
+function parseArchiveEnvelope(wiki: WikiMap): ArchiveEnvelope {
+  const file = wiki[ARCHIVE_FILE]
+  if (!file) return { ok: true, version: 0, entries: [] } // no archive yet — treated as empty v0
+
+  const fm = file.frontmatter
+  if (!fm || typeof fm !== 'object') {
+    return { ok: false, reason: 'archive frontmatter is not an object' }
+  }
+
+  const entries = fm[ENTRIES_KEY]
+  if (!Array.isArray(entries)) {
+    return { ok: false, reason: 'archive entries key is not an array' }
+  }
+
+  // No version key → legacy v0.
+  if (!(VERSION_KEY in fm)) {
+    return { ok: true, version: 0, entries }
+  }
+
+  const version = fm[VERSION_KEY]
+  if (version === 1) {
+    return { ok: true, version: 1, entries }
+  }
+
+  return { ok: false, reason: `unsupported archive version: ${String(version)}` }
+}
+
+/** Returns an error string if the archive envelope is corrupt (bad version,
+ *  missing entries key, etc.), or null if the archive is absent or valid.
+ *  Callers use this before readArchive to distinguish "no archive" from
+ *  "corrupt archive" — the former is a normal state; the latter must fail
+ *  safely and never cause recap generation. */
+export function archiveEnvelopeError(wiki: WikiMap): string | null {
+  const envelope = parseArchiveEnvelope(wiki)
+  return envelope.ok ? null : envelope.reason
+}
 
 // ── Validation ───────────────────────────────────────────────────────────────
 
 function isSafePositiveInteger(n: unknown): n is number {
   return typeof n === 'number' && Number.isInteger(n) && n > 0 && Number.isSafeInteger(n)
+}
+
+function isNonNegativeInteger(n: unknown): n is number {
+  return typeof n === 'number' && Number.isInteger(n) && n >= 0 && Number.isSafeInteger(n)
+}
+
+function isFiniteNumber(n: unknown): n is number {
+  return typeof n === 'number' && Number.isFinite(n)
 }
 
 function isIsoTimestamp(s: unknown): s is string {
@@ -77,22 +137,57 @@ function isIsoTimestamp(s: unknown): s is string {
   return !isNaN(d.getTime()) && s === d.toISOString()
 }
 
-function isValidRecapFacts(f: unknown): f is RecapFacts {
+export function isValidRecapFacts(f: unknown): f is RecapFacts {
   if (!f || typeof f !== 'object') return false
   const r = f as Record<string, unknown>
-  return (
-    isSafePositiveInteger(r.chapterNumber) &&
-    typeof r.chapterTitle === 'string' && r.chapterTitle.trim().length > 0 &&
-    typeof r.characterName === 'string' &&
-    typeof r.characterRole === 'string' &&
-    typeof r.isVisitor === 'boolean' &&
-    Array.isArray(r.beats) &&
-    r.beats.every((b) => b && typeof b === 'object' && typeof (b as any).id === 'string' && typeof (b as any).title === 'string') &&
-    Array.isArray(r.crew) &&
-    r.crew.every((c) => c && typeof c === 'object' && typeof (c as any).id === 'string' && typeof (c as any).name === 'string') &&
-    typeof r.journey === 'object' && r.journey !== null &&
-    typeof r.turnCount === 'number' && Number.isInteger(r.turnCount) && r.turnCount >= 0
-  )
+
+  // Top-level scalars.
+  if (!isSafePositiveInteger(r.chapterNumber)) return false
+  if (typeof r.chapterTitle !== 'string' || !r.chapterTitle.trim()) return false
+  if (typeof r.characterName !== 'string') return false
+  if (typeof r.characterRole !== 'string') return false
+  if (typeof r.isVisitor !== 'boolean') return false
+  if (!isNonNegativeInteger(r.turnCount)) return false
+
+  // Beats: array of { id: string, title: string }.
+  if (!Array.isArray(r.beats)) return false
+  if (!r.beats.every((b) =>
+    b && typeof b === 'object' &&
+    typeof (b as any).id === 'string' &&
+    typeof (b as any).title === 'string'
+  )) return false
+
+  // Crew: array of { id: string, name: string, trust: finite number, arc: string }.
+  if (!Array.isArray(r.crew)) return false
+  if (!r.crew.every((c) =>
+    c && typeof c === 'object' &&
+    typeof (c as any).id === 'string' &&
+    typeof (c as any).name === 'string' &&
+    isFiniteNumber((c as any).trust) &&
+    typeof (c as any).arc === 'string'
+  )) return false
+
+  // Journey: object with typed members.
+  if (!r.journey || typeof r.journey !== 'object') return false
+  const j = r.journey as Record<string, unknown>
+  if (!Array.isArray(j.zonesVisited) || !j.zonesVisited.every((x: unknown) => typeof x === 'string')) return false
+  if (!Array.isArray(j.crewSpoken) || !j.crewSpoken.every((x: unknown) => typeof x === 'string')) return false
+  if (!Array.isArray(j.shipAreasExplored) || !j.shipAreasExplored.every((x: unknown) => typeof x === 'string')) return false
+  if (typeof j.petInteracted !== 'boolean') return false
+
+  // Optional notableFacts: array of { file: string, facts: string[] }.
+  // Reject blank strings in persisted untrusted data.
+  if (r.notableFacts !== undefined) {
+    if (!Array.isArray(r.notableFacts)) return false
+    if (!r.notableFacts.every((nf) =>
+      nf && typeof nf === 'object' &&
+      typeof (nf as any).file === 'string' && (nf as any).file.trim().length > 0 &&
+      Array.isArray((nf as any).facts) &&
+      ((nf as any).facts as unknown[]).every((f: unknown) => typeof f === 'string' && (f as string).trim().length > 0)
+    )) return false
+  }
+
+  return true
 }
 
 /** Validate a raw (untrusted) entry from persisted JSON. Returns the entry if
@@ -129,9 +224,21 @@ export function validateArchiveEntry(raw: unknown): ArchivedRecapEntry | string 
     return `invalid or missing createdAt: ${String(e.createdAt)}`
   }
 
+  // Cross-checks: nested facts must agree with parent entry metadata.
+  const facts = e.facts as Record<string, unknown>
+  const entryChapterNumber = e.chapterNumber as number
+  const entryChapterTitle = (e.chapterTitle as string).trim()
+
+  if (facts.chapterNumber !== entryChapterNumber) {
+    return `facts.chapterNumber (${String(facts.chapterNumber)}) does not match entry chapterNumber (${entryChapterNumber})`
+  }
+  if (typeof facts.chapterTitle === 'string' && (facts.chapterTitle as string).trim() !== entryChapterTitle) {
+    return `facts.chapterTitle does not match entry chapterTitle`
+  }
+
   return {
     chapterNumber: e.chapterNumber as number,
-    chapterTitle: (e.chapterTitle as string).trim(),
+    chapterTitle: entryChapterTitle,
     title: (e.title as string).trim(),
     prose: (e.prose as string).trim(),
     facts: structuredClone(e.facts) as RecapFacts,
@@ -142,33 +249,25 @@ export function validateArchiveEntry(raw: unknown): ArchivedRecapEntry | string 
   }
 }
 
-// ── Raw access ───────────────────────────────────────────────────────────────
-
-/** Read the raw entries array from the archive file. Returns null if the file
- *  or entries key is absent (not an error — the playthrough just has no archive
- *  yet). */
-function rawEntries(wiki: WikiMap): unknown[] | null {
-  const file = wiki[ARCHIVE_FILE]
-  if (!file) return null
-  const entries = file.frontmatter?.[ENTRIES_KEY]
-  if (!Array.isArray(entries)) return null
-  return entries
-}
-
 // ── Reader ───────────────────────────────────────────────────────────────────
 
 /** Parse and validate every raw entry in the archive. Returns rows sorted by
  *  chapterNumber ascending. Invalid raw rows produce a status row with the
  *  reason — the caller decides whether to omit or surface them. Duplicate
- *  chapter numbers are flagged on the LATER row (the first is kept valid). */
+ *  chapter numbers are flagged on the LATER row (the first is kept valid).
+ *
+ *  Returns an empty array when no archive file exists. For corrupt envelopes
+ *  (bad version, etc.) this also returns an empty array — callers must check
+ *  archiveEnvelopeError() first to distinguish "absent" from "corrupt". */
 export function readArchive(wiki: WikiMap): ArchiveRow[] {
-  const raw = rawEntries(wiki)
-  if (!raw) return []
+  const envelope = parseArchiveEnvelope(wiki)
+  if (!envelope.ok) return []
+  if (envelope.entries.length === 0) return []
 
   const rows: ArchiveRow[] = []
   const seen = new Set<number>()
 
-  for (const r of raw) {
+  for (const r of envelope.entries) {
     const rawNum: number | null =
       r && typeof r === 'object' && isSafePositiveInteger((r as any).chapterNumber)
         ? (r as any).chapterNumber
@@ -209,9 +308,21 @@ export function validEntries(wiki: WikiMap): ArchivedRecapEntry[] {
 
 // ── Writer ───────────────────────────────────────────────────────────────────
 
+/** Read the raw entries array for appending. Returns the array (may be empty)
+ *  or null if the envelope is missing or corrupt. */
+function rawEntriesForWrite(wiki: WikiMap): unknown[] | null {
+  const envelope = parseArchiveEnvelope(wiki)
+  if (!envelope.ok) return null
+  return envelope.entries
+}
+
 /** Append a new recap entry to the archive. Validates the entry, rejects
- *  duplicates (same chapter number), deep-clones, sorts, and returns the
- *  new wiki. The original wiki is NOT mutated. */
+ *  duplicates (same chapter number), deep-clones all raw rows, sorts, and
+ *  returns the new wiki. The original wiki is NOT mutated.
+ *
+ *  If the existing archive is unversioned (v0), the new wiki is written as
+ *  version 1 while preserving every old raw entry exactly (including invalid
+ *  rows). Version 1 is always written for new appends. */
 export function appendArchivedRecap(wiki: WikiMap, entry: ArchivedRecapEntry): WikiMap {
   // Validate the entry before writing — defensive, even though callers should
   // build valid entries.
@@ -227,8 +338,10 @@ export function appendArchivedRecap(wiki: WikiMap, entry: ArchivedRecapEntry): W
     }
   }
 
-  // Deep-clone the existing entries, add the new one, sort.
-  const existing: unknown[] = [...(rawEntries(wiki) ?? [])]
+  // Deep-clone every existing raw row — no shared references between input
+  // and output wiki (fixes finding #6).
+  const raw = rawEntriesForWrite(wiki)
+  const existing: unknown[] = raw !== null ? structuredClone(raw) : []
   const clone = structuredClone(validated)
   existing.push(clone)
 
@@ -241,7 +354,7 @@ export function appendArchivedRecap(wiki: WikiMap, entry: ArchivedRecapEntry): W
 
   const next: WikiMap = structuredClone(wiki)
   next[ARCHIVE_FILE] = {
-    frontmatter: { [ENTRIES_KEY]: existing },
+    frontmatter: { [VERSION_KEY]: CURRENT_VERSION, [ENTRIES_KEY]: existing },
     body: '', // always empty — archive data lives in frontmatter
   }
   return next

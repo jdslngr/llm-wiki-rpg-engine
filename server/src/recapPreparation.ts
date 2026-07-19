@@ -15,7 +15,7 @@
 import { getChapter, canAdvanceFrom } from './chapters/index.js'
 import { chapterNumOf } from './chapterMeta.js'
 import { buildRecapFacts, type RecapFacts } from './recap.js'
-import { readArchive, appendArchivedRecap, type ArchivedRecapEntry } from './recapArchive.js'
+import { readArchive, appendArchivedRecap, archiveEnvelopeError, type ArchivedRecapEntry } from './recapArchive.js'
 import type { WikiMap, Turn } from './types.js'
 import type { PlayableId } from './game/characters.js'
 
@@ -71,26 +71,32 @@ export async function prepareChapterRecap(
 ): Promise<PreparationResult> {
   const currentChapter = chapterNumOf(wiki)
 
+  // ── Step 0: Check archive envelope integrity first ─────────────────────
+  const envelopeErr = archiveEnvelopeError(wiki)
+  if (envelopeErr) {
+    throw new RecapCorruptionError(currentChapter, `archive envelope: ${envelopeErr}`)
+  }
+
   // ── Step 1: Inspect archive before anything else ────────────────────────
   const archiveRows = readArchive(wiki)
-  // Find any row (valid or corrupt) matching the current chapter. The chapterNumber
-  // field is set even on invalid rows when the raw data had a parseable chapter number.
-  const currentRow = archiveRows.find(
+  // Collect ALL rows (valid or corrupt) whose parseable chapterNumber is the
+  // current chapter. If ANY matching row is invalid — including a later
+  // duplicate that .find() would have missed — fail safely.
+  const matchingRows = archiveRows.filter(
     (r) => r.chapterNumber === currentChapter,
   )
 
-  if (currentRow) {
-    if (!currentRow.status.valid) {
-      // Corrupt current-chapter entry — retryable failure, never regenerate.
+  if (matchingRows.length > 0) {
+    const badRow = matchingRows.find((r) => !r.status.valid)
+    if (badRow) {
       throw new RecapCorruptionError(
         currentChapter,
-        (currentRow.status as { valid: false; reason: string }).reason,
+        (badRow.status as { valid: false; reason: string }).reason,
       )
     }
 
-    // Valid archive hit — return exact snapshot. hasNextChapter is the only
-    // live-computed field; everything else comes from the immutable archive.
-    const entry = currentRow.entry
+    // Exactly one valid row — return immutable snapshot.
+    const entry = matchingRows[0].entry
     return {
       wiki, // wiki is unchanged — the archive already has the entry
       recap: {

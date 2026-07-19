@@ -235,12 +235,70 @@ check('corrupt entry for a DIFFERENT chapter does not block current', async () =
     isFinal: false,
     createdAt: 'invalid',
   })
-  wiki = { ...first.wiki, [ARCHIVE_FILE]: { frontmatter: { entries: raw }, body: '' } }
+  wiki = { ...first.wiki, [ARCHIVE_FILE]: { frontmatter: { version: 1, entries: raw }, body: '' } }
 
   // Change wiki to be at chapter 1 (current) — archive hit should still work for ch1.
   const result = await prepareChapterRecap(wiki, 'kaspen', history(), mockGenerate('NEW', 'NEW.'))
   assert(result.recap.title === 'Mock Recap', 'valid ch1 entry still works')
   assert(mockCallCount === 0, 'no regeneration — archive hit')
+})
+
+check('valid current row + duplicate current row throws corruption (all-rows check)', async () => {
+  resetMock()
+  let wiki = makeWiki()
+  const first = await prepareChapterRecap(wiki, 'kaspen', history(), mockGenerate())
+  resetMock()
+
+  // Add a duplicate valid entry for the same chapter (current = 1).
+  const raw = structuredClone(first.wiki[ARCHIVE_FILE]!.frontmatter!.entries) as any[]
+  const ch1 = structuredClone(raw.find((e: any) => e.chapterNumber === 1))
+  raw.push(ch1)
+  wiki = { ...first.wiki, [ARCHIVE_FILE]: { frontmatter: { version: 1, entries: raw }, body: '' } }
+
+  let threw: RecapCorruptionError | null = null
+  try {
+    await prepareChapterRecap(wiki, 'kaspen', history(), mockGenerate())
+  } catch (e) {
+    if (e instanceof RecapCorruptionError) threw = e
+  }
+  assert(threw !== null, 'must throw RecapCorruptionError for valid+duplicate current row')
+  assert(mockCallCount === 0, 'generator must not be called')
+})
+
+check('corrupt archive envelope (bad version) throws corruption', async () => {
+  resetMock()
+  const wiki = makeWiki()
+  wiki[ARCHIVE_FILE] = {
+    frontmatter: { version: 99, entries: [{
+      chapterNumber: 1,
+      chapterTitle: 'Test',
+      title: 'Test',
+      prose: 'Test prose.',
+      facts: {
+        chapterNumber: 1,
+        chapterTitle: 'Test',
+        characterName: 'Kaspen',
+        characterRole: 'Lead',
+        isVisitor: false,
+        beats: [{ id: 'a1', title: 'Start' }],
+        crew: [{ id: 'kaspen', name: 'Kaspen', trust: 50, arc: 'open' }],
+        journey: { zonesVisited: [], crewSpoken: [], shipAreasExplored: [], petInteracted: false },
+        turnCount: 1,
+      },
+      isFinal: false,
+      createdAt: '2026-07-19T00:00:00.000Z',
+    }] },
+    body: '',
+  }
+  let threw: RecapCorruptionError | null = null
+  try {
+    await prepareChapterRecap(wiki, 'kaspen', history(), mockGenerate())
+  } catch (e) {
+    if (e instanceof RecapCorruptionError) threw = e
+  }
+  assert(threw !== null, 'must throw RecapCorruptionError for corrupt envelope')
+  assert(threw!.reason.includes('envelope'), `reason must mention envelope, got: ${threw!.reason}`)
+  assert(mockCallCount === 0, 'generator must not be called')
 })
 
 // ---------------------------------------------------------------------------
