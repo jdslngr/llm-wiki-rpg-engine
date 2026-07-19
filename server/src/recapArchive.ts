@@ -61,7 +61,7 @@ export type RecapSummary = {
   chapterTitle: string
   title: string
   isFinal: boolean
-  createdAt: string
+  createdAt?: string
   legacy?: true
 }
 
@@ -364,36 +364,70 @@ export function appendArchivedRecap(wiki: WikiMap, entry: ArchivedRecapEntry): W
 
 const CHAPTER_LOG_HEADING_RE = /^## Chapter (\d+): (.+)$/gm
 
+type CandidateHeading = {
+  chapterNumber: number
+  chapterTitle: string
+  matchIndex: number
+  matchLength: number
+}
+
 /** Parse chapter-log.md body for legacy prose-only entries. Only exact
- *  `## Chapter N: Title` headings are recognised. Malformed or non-monotonic
- *  duplicates remain as raw prose under the prior recognised entry (the regex
- *  simply won't match them). Returns entries in parse order (chapter-number
- *  ascending for a well-formed log). */
+ *  `## Chapter N: Title` headings are recognised in strictly increasing
+ *  chapter-number order. Duplicate or non-increasing headings are not new
+ *  sections — their text remains raw prose under the preceding accepted
+ *  entry. Section boundaries use only accepted headings, so a rejected
+ *  heading's text is preserved in the earlier entry's prose exactly as the
+ *  legacy fallback promises. */
 export function parseLegacyChapterLog(wiki: WikiMap): LegacyRecapEntry[] {
   const body = wiki['chapter-log.md']?.body
   if (!body) return []
 
-  const entries: LegacyRecapEntry[] = []
+  // ── First pass: collect all candidate headings ──────────────────────────
+  const candidates: CandidateHeading[] = []
   const re = new RegExp(CHAPTER_LOG_HEADING_RE, 'gm')
   let match: RegExpExecArray | null
 
   while ((match = re.exec(body)) !== null) {
     const chapterNumber = Number(match[1])
     if (!isSafePositiveInteger(chapterNumber)) continue
+    candidates.push({
+      chapterNumber,
+      chapterTitle: match[2].trim(),
+      matchIndex: match.index,
+      matchLength: match[0].length,
+    })
+  }
 
-    const chapterTitle = match[2].trim()
-    // Extract prose: everything from after this heading to the next heading or EOF.
-    const proseStart = match.index + match[0].length
-    const nextHeading = body.indexOf('\n## ', proseStart)
-    const prose = body
-      .slice(proseStart, nextHeading === -1 ? undefined : nextHeading)
-      .trim()
+  // ── Second pass: accept only strictly increasing, non-duplicate headings ─
+  const seen = new Set<number>()
+  let lastAccepted = 0
+  const accepted: CandidateHeading[] = []
+
+  for (const c of candidates) {
+    if (c.chapterNumber > lastAccepted && !seen.has(c.chapterNumber)) {
+      accepted.push(c)
+      seen.add(c.chapterNumber)
+      lastAccepted = c.chapterNumber
+    }
+  }
+
+  // ── Build entries from accepted headings only ───────────────────────────
+  const entries: LegacyRecapEntry[] = []
+
+  for (let i = 0; i < accepted.length; i++) {
+    const current = accepted[i]
+    const proseStart = current.matchIndex + current.matchLength
+    const nextAccepted = accepted[i + 1]
+    // Section ends at the next ACCEPTED heading — rejected headings and their
+    // prose live inside the preceding accepted entry's prose.
+    const proseEnd = nextAccepted ? nextAccepted.matchIndex : undefined
+    const prose = body.slice(proseStart, proseEnd).trim()
 
     if (!prose) continue // empty section — skip
 
     entries.push({
-      chapterNumber,
-      chapterTitle,
+      chapterNumber: current.chapterNumber,
+      chapterTitle: current.chapterTitle,
       prose,
       legacy: true,
     })
@@ -434,8 +468,8 @@ export function toSummary(entry: ArchivedRecapEntry | LegacyRecapEntry): RecapSu
       chapterTitle: entry.chapterTitle,
       title: `Chapter ${entry.chapterNumber}`,
       isFinal: false, // legacy entries cannot be known to be final
-      createdAt: '', // legacy entries have no timestamp
       legacy: true,
+      // createdAt intentionally omitted — legacy entries have no timestamp
     }
   }
   return {

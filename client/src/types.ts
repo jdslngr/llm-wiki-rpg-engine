@@ -119,7 +119,7 @@ export type RecapSummary = {
   chapterTitle: string
   title: string
   isFinal: boolean
-  createdAt: string
+  createdAt?: string
   legacy?: true
 }
 
@@ -139,7 +139,7 @@ export type RecapDetailEntry = {
   isFinal: boolean
   epilogue?: string
   acknowledgment?: string
-  createdAt: string
+  createdAt?: string
   legacy?: true
 }
 

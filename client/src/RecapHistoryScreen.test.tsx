@@ -38,7 +38,8 @@ function mockSummaries(n: number) {
     chapterTitle: CHAPTERS[i].title,
     title: CHAPTERS[i].recapTitle,
     isFinal: i === n - 1,
-    createdAt: new Date(2026, 0, i + 1).toISOString(),
+    // Legacy entries (i === 0) have no timestamp — matches server behaviour.
+    ...(i !== 0 ? { createdAt: new Date(2026, 0, i + 1).toISOString() } : {}),
     ...(i === 0 ? { legacy: true as const } : {}),
   }))
   // Server returns newest-first; replicate that order.
@@ -67,7 +68,8 @@ function mockDetail(chapterNumber: number, opts?: { legacy?: boolean; isFinal?: 
       isFinal: opts?.isFinal ?? false,
       epilogue: opts?.epilogue,
       acknowledgment: opts?.acknowledgment,
-      createdAt: new Date(2026, 0, chapterNumber).toISOString(),
+      // Legacy entries omit createdAt — matches server behaviour.
+      ...(opts?.legacy ? {} : { createdAt: new Date(2026, 0, chapterNumber).toISOString() }),
       ...(opts?.legacy ? { legacy: true as const } : {}),
     },
     legacy: opts?.legacy ?? false,
@@ -322,5 +324,40 @@ describe('RecapHistoryScreen', () => {
 
     expect(await screen.findByText('Recap not found.')).toBeInTheDocument()
     expect(screen.getByText('← Back to list')).toBeInTheDocument()
+  })
+
+  it('renders "Pre-archive save" for legacy entries, never "Invalid Date"', async () => {
+    setupFetch({ '/api/recaps': mockSummaries(2) })
+
+    render(<RecapHistoryScreen onResume={vi.fn()} />)
+
+    await screen.findByText('The Arrival')
+
+    // Chapter 1 is legacy (i=0 in mockSummaries) — should show "Pre-archive save" label.
+    expect(screen.getByText('Pre-archive save')).toBeInTheDocument()
+    // Must never render "Invalid Date".
+    expect(screen.queryByText('Invalid Date')).not.toBeInTheDocument()
+  })
+
+  it('renders fallback for malformed timestamp without "Invalid Date"', async () => {
+    // Return a summary with a garbled createdAt and no legacy flag.
+    const malformed = {
+      recaps: [{
+        chapterNumber: 1,
+        chapterTitle: 'The Arrival',
+        title: 'Landfall at Dawn',
+        isFinal: false,
+        createdAt: 'not-a-date',
+      }],
+    }
+    setupFetch({ '/api/recaps': malformed })
+
+    render(<RecapHistoryScreen onResume={vi.fn()} />)
+
+    await screen.findByText('The Arrival')
+
+    // The garbled timestamp should produce the fallback, not "Invalid Date".
+    expect(screen.getByText('Pre-archive save')).toBeInTheDocument()
+    expect(screen.queryByText('Invalid Date')).not.toBeInTheDocument()
   })
 })

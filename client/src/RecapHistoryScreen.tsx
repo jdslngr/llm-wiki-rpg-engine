@@ -314,12 +314,11 @@ export default function RecapHistoryScreen({ onResume }: Props) {
 
   const sorted = sort === 'newest' ? summaries : [...summaries].reverse()
 
-  function formatDate(iso: string): string {
-    try {
-      return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
-    } catch {
-      return iso
-    }
+  function formatDate(iso: string | undefined): string {
+    if (!iso) return 'Pre-archive save'
+    const date = new Date(iso)
+    if (Number.isNaN(date.getTime())) return 'Pre-archive save'
+    return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────

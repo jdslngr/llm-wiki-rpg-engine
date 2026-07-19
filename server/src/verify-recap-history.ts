@@ -14,8 +14,10 @@ import {
   parseLegacyChapterLog,
   mergeArchiveAndLegacy,
   archiveEnvelopeError,
+  toSummary,
   ARCHIVE_FILE,
   type ArchivedRecapEntry,
+  type LegacyRecapEntry,
 } from './recapArchive.js'
 import { runWriteBack } from './engine.js'
 import type { WikiMap } from './types.js'
@@ -354,6 +356,50 @@ check('empty prose section skipped', () => {
   assert(entries[0].chapterNumber === 2, 'empty section skipped')
 })
 
+check('duplicate chapter 1 + valid 2: duplicate rejected, prose preserved in ch1', () => {
+  const wiki = emptyWiki()
+  wiki['chapter-log.md'] = {
+    frontmatter: {},
+    body: '## Chapter 1: First\nCh1 prose original.\n\n## Chapter 1: Dup\nDuplicate prose.\n\n## Chapter 2: Second\nCh2 prose.',
+  }
+  const entries = parseLegacyChapterLog(wiki)
+  assert(entries.length === 2, `expected 2, got ${entries.length}`)
+  assert(entries[0].chapterNumber === 1, 'ch1 present')
+  assert(entries[1].chapterNumber === 2, 'ch2 present')
+  // The duplicate heading and its prose must be inside chapter 1's prose.
+  assert(entries[0].prose.includes('Duplicate prose.'), 'dup prose preserved in ch1')
+  assert(entries[0].prose.includes('## Chapter 1: Dup'), 'dup heading preserved in ch1 prose')
+})
+
+check('descending chapter numbers: 3 then 2 then valid 4', () => {
+  const wiki = emptyWiki()
+  wiki['chapter-log.md'] = {
+    frontmatter: {},
+    body: '## Chapter 3: First\nCh3 prose.\n\n## Chapter 2: Desc\nDescending prose.\n\n## Chapter 4: Last\nCh4 prose.',
+  }
+  const entries = parseLegacyChapterLog(wiki)
+  assert(entries.length === 2, `expected 2 (3 and 4), got ${entries.length}`)
+  assert(entries[0].chapterNumber === 3, 'ch3 first')
+  assert(entries[1].chapterNumber === 4, 'ch4 second')
+  // The descending heading and prose must be in chapter 3's prose.
+  assert(entries[0].prose.includes('Descending prose.'), 'desc prose in ch3')
+  assert(entries[0].prose.includes('## Chapter 2: Desc'), 'desc heading in ch3 prose')
+})
+
+check('well-formed sequence surrounding malformed headings', () => {
+  const wiki = emptyWiki()
+  wiki['chapter-log.md'] = {
+    frontmatter: {},
+    body: '## Chapter 1: Good\nCh1 prose.\n\n## Chapter X: Bad\nBad heading prose.\n\n## Chapter 2: Also Good\nCh2 prose.',
+  }
+  const entries = parseLegacyChapterLog(wiki)
+  assert(entries.length === 2, `expected 2, got ${entries.length}`)
+  assert(entries[0].chapterNumber === 1, 'ch1')
+  assert(entries[1].chapterNumber === 2, 'ch2')
+  // The malformed heading and its prose should be inside chapter 1's prose.
+  assert(entries[0].prose.includes('Bad heading prose.'), 'bad heading prose preserved')
+})
+
 // ---------------------------------------------------------------------------
 // §5 — mergeArchiveAndLegacy (archive precedence)
 // ---------------------------------------------------------------------------
@@ -407,9 +453,40 @@ check('legacy fills gaps archive does not cover', () => {
   assert(ch2 && !('legacy' in ch2), 'ch2 must be archive')
 })
 
+check('mergeArchiveAndLegacy: malformed legacy does not create duplicate chapters', () => {
+  let wiki = emptyWiki()
+  wiki = appendArchivedRecap(wiki, makeEntry({ chapterNumber: 1 }))
+  // Legacy has duplicate chapter 1 headings — parser rejects the second.
+  wiki['chapter-log.md'] = {
+    frontmatter: {},
+    body: '## Chapter 1: First\nLegacy ch1 prose.\n\n## Chapter 1: Dup\nDuplicate legacy.\n\n## Chapter 2: Second\nLegacy ch2 prose.',
+  }
+  const merged = mergeArchiveAndLegacy(wiki)
+  // Chapter 1 from archive wins; Chapter 2 from legacy. No duplicates.
+  const ch1s = merged.filter((m) => m.chapterNumber === 1)
+  assert(ch1s.length === 1, `expected exactly 1 ch1, got ${ch1s.length}`)
+  const ch2 = merged.find((m) => m.chapterNumber === 2)
+  assert(ch2 !== undefined, 'ch2 must be present (legacy fallback)')
+})
+
 // ---------------------------------------------------------------------------
-// §6 — AI-write exclusion (engine protects archive files)
+// §10 — toSummary timestamp behaviour
 // ---------------------------------------------------------------------------
+console.log('\n§10 — toSummary timestamp behaviour')
+
+check('legacy toSummary omits createdAt', () => {
+  const legacy: LegacyRecapEntry = { chapterNumber: 1, chapterTitle: 'Test', prose: 'Prose.', legacy: true }
+  const summary = toSummary(legacy)
+  assert(summary.legacy === true, 'legacy flag')
+  assert(!('createdAt' in summary) || summary.createdAt === undefined, 'createdAt must be absent for legacy')
+})
+
+check('archive toSummary includes createdAt', () => {
+  const entry = makeEntry({ chapterNumber: 1, createdAt: '2026-01-15T12:00:00.000Z' })
+  const summary = toSummary(entry)
+  assert(summary.createdAt === '2026-01-15T12:00:00.000Z', 'createdAt preserved')
+  assert(!summary.legacy, 'not legacy')
+})
 console.log('\n§6 — Engine AI-write exclusion')
 
 function wikiWithAllFiles(): WikiMap {
