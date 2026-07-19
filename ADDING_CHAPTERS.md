@@ -262,6 +262,33 @@ That's it — flesh out the prose and beat notes and you have a chapter.
 
 ---
 
+## Marking a chapter as the final chapter
+
+If this is the last chapter of your whole story, check **"Mark as the final chapter"** in the
+authoring tool (or set `isFinal: true` in the ChapterSpec if going manual). This does two things:
+
+1. **The chapter cannot advance**, even if a later chapter exists in the registry. `canAdvanceFrom`
+   returns `false`, so "Continue to Chapter N+1" never appears on the recap screen.
+
+2. **You unlock two optional text fields** — **Epilogue** and **Acknowledgment**. They are
+   independent (you can supply either, both, or neither). Blank or whitespace-only fields are
+   treated as absent.
+
+   - **Epilogue** — author-written closing prose. Rendered after the AI recap on the chapter-end
+     screen and in the Recap History detail view. Use it for a proper send-off, a teaser, or a
+     "where are they now" beat.
+   - **Acknowledgment** — author-written credits or thank-you text. Rendered in a lighter style
+     after the Epilogue.
+
+These closing sections are **author content only** — the AI never generates them. The recap
+history archive stores them immutably alongside the chapter's facts and prose so players can
+revisit them from the "Recap History" screen any time.
+
+If the chapter is *not* final and has no successor, the recap screen shows "More chapters coming
+soon" — no need to fake an ending.
+
+---
+
 ## Who does what (so you're not stuck waiting on code)
 
 | Task | You (author) | The tool / AI |

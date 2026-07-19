@@ -3,6 +3,10 @@
 # Phase 2: the app now USES this database. DATABASE_URL (below) points the server at
 # the `db` service, so playthroughs persist across restarts. Without DATABASE_URL the
 # server falls back to an in-memory store (used by plain `npm run dev`).
+#
+# ⚠️ Single-instance limit: the chapter-end lock (chapterEndLock.ts) is process-local.
+# This Compose file runs exactly one `app` replica — do not scale beyond 1 without
+# replacing the in-process lock with a shared transaction or advisory-lock design.
 
 services:
   app:

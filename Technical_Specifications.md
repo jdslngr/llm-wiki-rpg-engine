@@ -211,6 +211,10 @@ type ChapterSpec = {
   events: { token: string; anchor: string; fold: { field: string; token?: string } }[]
   opening: { prose: string; actions: string[] }
   softLockThreshold?: number      // default 5
+  endState?: EndStateOp[]         // durable cross-chapter writes (see §5)
+  isFinal?: boolean               // marks this as the last chapter; defaults false
+  epilogue?: string               // optional author-written closing prose (only meaningful when isFinal)
+  acknowledgment?: string         // optional author-written credits/thank-you (only meaningful when isFinal)
 }
 ```
 
@@ -236,6 +240,9 @@ interface Chapter {
   scratchSeed(): Record<string, unknown>  // [] for token-bearing folds, false for flags — auto-derived
   openingFor(characterId: string): { prose: string; actions: string[] }
   endState?: (wiki: WikiMap) => void      // optional durable write — see below
+  isFinal: boolean                        // author-declared final chapter; defaults false
+  epilogue?: string                       // author-written closing prose
+  acknowledgment?: string                 // author-written credits/thank-you
 }
 ```
 
@@ -245,7 +252,9 @@ interface Chapter {
 `loadAuthoredChapters()`. Saving a chapter through the admin endpoint
 calls `registerSpec()` directly — the cache updates immediately, no restart needed. **A raw
 database write to `authored_chapters` does NOT update the live cache** — only a server restart
-(which reruns `loadAuthoredChapters`) or the save endpoint does.
+(which reruns `loadAuthoredChapters`) or the save endpoint does. `canAdvanceFrom(n)` gates
+chapter transitions: returns `true` only when chapter `n` is not final AND chapter `n+1` exists
+in the registry.
 
 **The golden rule** (`validateChapterSpec`, run by the save endpoint before every write): every
 field a condition reads must be fed by some event's fold; every event must belong to a real
@@ -303,6 +312,18 @@ end-state" section for the declarative form.
   `buildNotableFactsBlock`) so anything durable gets one chance to be woven into the permanent
   recap before consolidation clears the live arrays — cached into `recap.md` so revisiting the
   recap never re-bills (see `WIKI_FACTS_FOLD_UPGRADE.md`).
+- **Recap archive** (`recapArchive.ts`) — append-only, immutable store of every completed
+  chapter recap kept in `recap-history.md` frontmatter. Once written an entry is never
+  rewritten — later chapter edits cannot change historical recap data. A legacy prose-only
+  fallback (`chapter-log.md`) is parsed for chapters predating the archive; archive always
+  wins for the same chapter number.
+- **Recap preparation** (`recapPreparation.ts`) — shared archive-first, cache-second,
+  generate-last logic used by both the recap and next-chapter routes. Valid archive hits
+  return the exact snapshot (only `hasNextChapter` is live-computed); corrupt entries throw
+  a retryable error and never regenerate.
+- **Chapter-end lock** (`chapterEndLock.ts`) — process-local FIFO lock keyed by playthrough
+  id. Prevents concurrent recap generation or chapter advancement for the same save. Release
+  is idempotent; different keys are independent. Sufficient for one live Node app instance.
 - **Rollback** (`POST /api/rollback`, admin-only) — restores the wiki from the one stored
   `wiki_history` snapshot and trims the last player/AI exchange from `history`. One step only;
   the snapshot is dropped once consumed.
@@ -363,6 +384,12 @@ additionally require the session's username to be listed in `ADMIN_USERNAMES`.
 | `POST /api/next-chapter` | Consolidate and advance to the next chapter, or report the story is complete. |
 | `POST /api/rollback` | **Admin.** Undo the last committed turn. |
 
+**Protected — recap history** (read-only, ownership-checked via pid cookie)
+| Route | Purpose |
+|---|---|
+| `GET /api/recaps` | Newest-first summary list of all completed chapter recaps. |
+| `GET /api/recaps/:chapterNumber` | Exact archive or legacy detail for one chapter. Never calls the LLM. |
+
 **Protected — chapter authoring (admin only)**
 | Route | Purpose |
 |---|---|
@@ -409,6 +436,10 @@ additionally require the session's username to be listed in `ADMIN_USERNAMES`.
 | `consolidate.ts` | Chapter-end transition: durable writes, scratch reset, next-chapter seed, clears AI-authored `facts` arrays (post-fold), `appendChapterLog` (episodic summary into `chapter-log.md`). |
 | `migrate.ts` | Seeds scratch fields a save is missing (chapter edited after the save started). |
 | `recap.ts` | Recap facts (code, incl. a snapshot of live AI-authored facts) + recap prose (one cached AI call that folds those facts in). |
+| `recapArchive.ts` | Append-only immutable recap archive in `recap-history.md`; validation, sorted read, legacy chapter-log parser, archive/legacy merge. |
+| `recapPreparation.ts` | Shared archive-first/cache-second/generate-last logic for `/api/recap` and `/api/next-chapter`. |
+| `recapHistoryRoutes.ts` | Read-only `GET /api/recaps` and `GET /api/recaps/:chapterNumber` routes. |
+| `chapterEndLock.ts` | Process-local per-playthrough FIFO lock for chapter-end operations. |
 | `retry.ts` | Turn retry/timeout constants, the friendly failure message, and `MODEL_WINDOW_TURNS` (the model's per-chapter context window). |
 | `expandChapter.ts` | The authoring tool's AI expansion step (brief → draft `ChapterSpec`). |
 | `worldBible.ts` | The fixed, compressed system-prompt core. |
@@ -430,6 +461,7 @@ additionally require the session's username to be listed in `ADMIN_USERNAMES`.
 | `characterCards.ts` | Static per-character card data (emoji, summary, gear) for the character select screen. |
 | `GameScreen.tsx` | Responsive turn-loop UI — scrollable transcript with edge navigation, compact header menu, collapsible dossier/suggestions, auto-growing input, streamed response, and admin debug context. |
 | `RecapScreen.tsx` | Chapter-end recap + "Continue to Chapter N" / story-complete state. |
+| `RecapHistoryScreen.tsx` | "Your Story So Far" — browse past chapter recaps (list + detail), race-condition-safe fetches, fresh-state back-to-game. |
 | `SettingsScreen.tsx` | BYOK/hosted settings, key entry + validation. |
 | `AuthoringScreen.tsx` | Admin chapter-authoring UI (brief → expand → review → save/edit/delete). |
 | `ArtAdminScreen.tsx` | Admin art upload/delete UI (chapter/beat selector, MIME + size validation, local preview, existing-art list). |
@@ -439,10 +471,10 @@ additionally require the session's username to be listed in `ADMIN_USERNAMES`.
 
 **Screen routing:** `App.tsx` holds a `screen` string in `useState` and renders one component
 per value (`'login' | 'signup' | 'saves' | 'select' | 'settings' | 'game' | 'recap' |
-'authoring' | 'artAdmin' | 'chapterArt'`); each screen takes callback props (`onLogin`,
-`onResume`, …) that call `setScreen`. The `chapterArt` screen also carries `artPlaythroughId`
-state scoped to the selected save (not the active `pid` cookie). On boot it calls
-`/api/auth/me` then `/api/state` to decide where to land. No client-side router library.
+'recapHistory' | 'authoring' | 'artAdmin' | 'chapterArt'`); each screen takes callback props
+(`onLogin`, `onResume`, …) that call `setScreen`. The `chapterArt` screen also carries
+`artPlaythroughId` state scoped to the selected save (not the active `pid` cookie). On boot it
+calls `/api/auth/me` then `/api/state` to decide where to land. No client-side router library.
 
 ---
 
@@ -459,8 +491,20 @@ state scoped to the selected save (not the active `pid` cookie). On boot it call
 | Packaging | Docker + `docker-compose` (app + Postgres) |
 
 Root `package.json` scripts: `dev` (concurrently runs server `tsx watch` + client `vite`),
-`build` (client `vite build` then server `tsc`), `start` (`node server/dist/index.js`). See
+`build` (client `tsc -b && vite build` then server `tsc`), `start` (`node server/dist/index.js`).
+Client also has `test` (`vitest run` — React Testing Library + jsdom). See
 [README.md](README.md) for local setup and the Docker deploy flow.
+
+**Verification scripts** (`npx tsx src/<name>.ts` from `server/`):
+| Script | Covers |
+|---|---|
+| `verify-final-chapter.ts` | `isFinal`/`epilogue`/`acknowledgment` defaults, normalization, validation, backward compat (29 tests). |
+| `verify-recap-history.ts` | Archive entry validation, read/append/legacy-parse/merge, AI-write exclusion (47 tests). |
+| `verify-recap-history-phase3.ts` | `prepareChapterRecap` archive-first logic, corruption safety, lock FIFO, wikiStateOf exclusion (22 tests). |
+| `verify-recap-history-routes.ts` | Live Express HTTP tests for auth/ownership/parse/read-only behavior (22 tests). |
+| `verify-facts.ts` | Fact addition/eviction/guards (19 tests). |
+| `verify-facts-recap.ts` | `buildRecapFacts` notableFacts, consolidation (17 tests). |
+| `verify-endstate.ts` | `endState` ops, golden-rule, cross-chapter validation (31 tests). |
 
 ---
 

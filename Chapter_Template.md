@@ -175,6 +175,15 @@ const SPEC: ChapterSpec = {
 
   softLockThreshold: 5, // optional; turns without progress before a gentle in-world nudge
 
+  // optional — mark this as the final chapter of the story; defaults false
+  isFinal: false,
+
+  // optional — author-written closing prose (only meaningful when isFinal is true)
+  epilogue: '<…>',
+
+  // optional — author-written thank-you / credits (independent of epilogue)
+  acknowledgment: '<…>',
+
   // optional — durable facts to write into world-state.md when this chapter ENDS (see below)
   endState: [
     { field: 'chapterend_<name>', op: 'set', value: true },

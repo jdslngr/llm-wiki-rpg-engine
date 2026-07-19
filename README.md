@@ -122,6 +122,12 @@ real playthrough: turn 2 read 5,210 of 5,550 input tokens from cache, turn 3 rea
 - 👤 **Accounts & saves** — own email/password auth (bcrypt + httpOnly session cookie),
   ownership-checked routes, multiple save files, resume-where-you-left-off.
 - 📖 **Chapter-end recap** — engine-derived facts woven into a short AI-written summary.
+- 📜 **Recap history archive** — every completed chapter recap is stored immutably;
+  players can browse past recaps from the game nav menu. Archive entries are never
+  regenerated — later chapter edits can't change what already happened.
+- 🏁 **Final-chapter support** — authors mark a chapter as the end of the story,
+  optionally writing an Epilogue and Acknowledgment. The recap screen reflects these
+  without generic "The End" copy.
 - 📝 **AI-authored memory** — the model can append short, freeform durable notes per
   character/world file — *why* a choice was made, not just lore. Capped per file so the
   per-turn prompt stays small; at chapter end, anything still live gets one chance to be
@@ -170,6 +176,9 @@ npm run dev
 
 # or the packaged app + Postgres — http://localhost:3001
 docker compose up
+
+# run the client test suite
+npm --prefix client run test
 ```
 
 The API key lives only in `server/.env` / the server process — **it never reaches the
@@ -213,6 +222,10 @@ server/src/
   llm.ts               provider layer — swap vendors via env; prompt caching; BYOK
   auth.ts              bcrypt hashing, session tokens, requireAuth/requireAdmin middleware
   recap.ts             chapter-end recap (engine facts + notable AI facts + one AI prose call)
+  recapArchive.ts      append-only recap-history.md archive; legacy prose fallback
+  recapPreparation.ts  archive-first shared chapter-recap logic
+  recapHistoryRoutes.ts  read-only history API (GET /api/recaps, GET /api/recaps/:n)
+  chapterEndLock.ts    per-playthrough FIFO lock for chapter-end operations
   worldBible.ts        the world as the fixed system-prompt core            ← story content
   chapters/types.ts    the Chapter interface every chapter implements + CHAPTER_END
   chapters/defineChapter.ts  data-driven chapter builder (ChapterSpec → Chapter) + the
@@ -228,6 +241,7 @@ server/src/
 client/src/
   App.tsx              screen router (login → saves → character select → game → authoring)
   GameScreen.tsx       the streaming game UI (story log, actions, input)
+  RecapHistoryScreen.tsx  "Your Story So Far" — browse past recaps from the game nav
   AuthoringScreen.tsx  admin-only chapter authoring UI (brief → AI draft → review → save)
   ArtAdminScreen.tsx   admin-only art upload / delete UI (chapter/beat selector, MIME + size validation, preview)
   ChapterArtScreen.tsx per-save art gallery (chapter list → detail → full-screen overlay)
@@ -249,6 +263,8 @@ everything else is the reusable engine. The full recipe is in
   the next chapter; returns the new game state, or `{ complete: true }` when the story is over.
 - `POST /api/new-game` · `GET /api/state` · `GET /api/saves` · `POST /api/saves/:id/resume`
 - `GET /api/recap` — the chapter-end recap (cached after first generation)
+- `GET /api/recaps` — recap-history summary list (newest first); `GET /api/recaps/:n` — detail
+  for a specific completed chapter. Read-only, never calls the LLM; archive wins over legacy prose.
 - `POST /api/auth/signup` · `/login` · `/logout` · `GET /api/auth/me` (includes `isAdmin`)
 - **Admin-only** (`requireAdmin`, gated by `ADMIN_USERNAMES`) — the authoring tool:
   `POST /api/admin/expand-chapter` (brief → AI-drafted `ChapterSpec`) ·
