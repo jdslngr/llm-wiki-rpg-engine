@@ -122,9 +122,13 @@ real playthrough: turn 2 read 5,210 of 5,550 input tokens from cache, turn 3 rea
 - 👤 **Accounts & saves** — own email/password auth (bcrypt + httpOnly session cookie),
   ownership-checked routes, multiple save files, resume-where-you-left-off.
 - 📖 **Chapter-end recap** — engine-derived facts woven into a short AI-written summary.
-- 📜 **Recap history archive** — every completed chapter recap is stored immutably;
+- 📜 **Recap history archive** — every completed chapter recap is stored immutably
+  in a versioned `recap-history.md` envelope (`{ version: 1, entries: [...] }`);
   players can browse past recaps from the game nav menu. Archive entries are never
-  regenerated — later chapter edits can't change what already happened.
+  regenerated — later chapter edits can't change what already happened. Existing
+  unversioned archives are read as legacy v0 and silently upgraded on the next append.
+  A corrupt or unsupported version is treated as archive corruption, never mistaken
+  for an empty archive.
 - 🏁 **Final-chapter support** — authors mark a chapter as the end of the story,
   optionally writing an Epilogue and Acknowledgment. The recap screen reflects these
   without generic "The End" copy.
@@ -343,6 +347,36 @@ The thinking behind the game and the engine lives in the repo:
   your highest registered chapter.
 
 ---
+
+## Verification
+
+Run smoke tests from the repository root. All paths must include the `server/` prefix:
+
+```powershell
+npm --prefix server run build
+npm --prefix client run build
+
+# Recap-history verifiers (archive, preparation, routes)
+npm --prefix server exec -- tsx server/src/verify-recap-history.ts
+npm --prefix server exec -- tsx server/src/verify-recap-history-phase3.ts
+npm --prefix server exec -- tsx server/src/verify-recap-history-routes.ts
+
+# Non-recap verifiers
+npm --prefix server exec -- tsx server/src/verify-final-chapter.ts
+npm --prefix server exec -- tsx server/src/verify-facts.ts
+npm --prefix server exec -- tsx server/src/verify-facts-recap.ts
+npm --prefix server exec -- tsx server/src/verify-endstate.ts
+
+# Client test suite
+npm --prefix client run test
+```
+
+The `verify-store-deletion.ts` check requires a reachable Postgres database
+(`DATABASE_URL` set) — it will refuse to run against the in-memory fallback.
+
+The chapter-end lock (`chapterEndLock.ts`) is **process-local**: it serialises
+concurrent requests within a single Node.js instance but is *not* safe across
+multiple processes. Deployments must continue to run one app instance.
 
 ## License
 

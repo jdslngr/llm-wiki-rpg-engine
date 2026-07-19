@@ -313,17 +313,26 @@ end-state" section for the declarative form.
   recap before consolidation clears the live arrays — cached into `recap.md` so revisiting the
   recap never re-bills (see `WIKI_FACTS_FOLD_UPGRADE.md`).
 - **Recap archive** (`recapArchive.ts`) — append-only, immutable store of every completed
-  chapter recap kept in `recap-history.md` frontmatter. Once written an entry is never
-  rewritten — later chapter edits cannot change historical recap data. A legacy prose-only
-  fallback (`chapter-log.md`) is parsed for chapters predating the archive; archive always
-  wins for the same chapter number.
+  chapter recap kept in `recap-history.md` frontmatter as a versioned envelope
+  (`{ version: 1, entries: [...] }`). Once written an entry is never rewritten — later chapter
+  edits cannot change historical recap data. Existing unversioned archives (`{ entries: [...] }`)
+  are read as legacy v0 and silently upgraded to v1 on the next successful append (invalid
+  rows preserved byte-for-value). A corrupt or unsupported declared version is treated as
+  archive corruption — `archiveEnvelopeError()` returns the reason; `prepareChapterRecap` fails
+  safely with `RecapCorruptionError` rather than regenerating. A legacy prose-only fallback
+  (`chapter-log.md`) is parsed for chapters predating the archive (only strictly increasing
+  chapter numbers accepted); archive always wins for the same chapter number.
 - **Recap preparation** (`recapPreparation.ts`) — shared archive-first, cache-second,
   generate-last logic used by both the recap and next-chapter routes. Valid archive hits
   return the exact snapshot (only `hasNextChapter` is live-computed); corrupt entries throw
   a retryable error and never regenerate.
 - **Chapter-end lock** (`chapterEndLock.ts`) — process-local FIFO lock keyed by playthrough
   id. Prevents concurrent recap generation or chapter advancement for the same save. Release
-  is idempotent; different keys are independent. Sufficient for one live Node app instance.
+  is idempotent; different keys are independent. The map entry is retained while a successor
+  runs, then deleted only when the final holder releases with no queued waiters — this prevents
+  a third request from seeing an empty queue and entering concurrently with a just-woken holder.
+  **Single-process limitation:** this lock is not safe across multiple Node.js processes;
+  deployments must continue to run one app instance.
 - **Rollback** (`POST /api/rollback`, admin-only) — restores the wiki from the one stored
   `wiki_history` snapshot and trims the last player/AI exchange from `history`. One step only;
   the snapshot is dropped once consumed.
@@ -495,16 +504,21 @@ Root `package.json` scripts: `dev` (concurrently runs server `tsx watch` + clien
 Client also has `test` (`vitest run` — React Testing Library + jsdom). See
 [README.md](README.md) for local setup and the Docker deploy flow.
 
-**Verification scripts** (`npx tsx src/<name>.ts` from `server/`):
+**Verification scripts** — run from the repository root:
+```powershell
+npm --prefix server exec -- tsx server/src/<name>.ts
+```
+
 | Script | Covers |
 |---|---|
 | `verify-final-chapter.ts` | `isFinal`/`epilogue`/`acknowledgment` defaults, normalization, validation, backward compat (29 tests). |
-| `verify-recap-history.ts` | Archive entry validation, read/append/legacy-parse/merge, AI-write exclusion (47 tests). |
-| `verify-recap-history-phase3.ts` | `prepareChapterRecap` archive-first logic, corruption safety, lock FIFO, wikiStateOf exclusion (22 tests). |
+| `verify-recap-history.ts` | Archive entry validation, facts hardening (crew/journey/notableFacts), envelope versioning (v0/v1/corrupt), legacy parsing (strictly increasing only), read/append/merge, AI-write exclusion, deep-clone isolation (79 tests). |
+| `verify-recap-history-phase3.ts` | `prepareChapterRecap` archive-first logic, all-rows corruption safety, envelope corruption, lock FIFO + A/B/C timing regression, wikiStateOf exclusion (25 tests). |
 | `verify-recap-history-routes.ts` | Live Express HTTP tests for auth/ownership/parse/read-only behavior (22 tests). |
 | `verify-facts.ts` | Fact addition/eviction/guards (19 tests). |
 | `verify-facts-recap.ts` | `buildRecapFacts` notableFacts, consolidation (17 tests). |
-| `verify-endstate.ts` | `endState` ops, golden-rule, cross-chapter validation (31 tests). |
+| `verify-endstate.ts` | `endState` ops, golden-rule, cross-chapter validation, + nested verify-facts/verify-chapter-fold smoke tests (31 tests). |
+| `verify-store-deletion.ts` | Postgres-backed store deletion (requires `DATABASE_URL`). |
 
 ---
 

@@ -1,5 +1,5 @@
 // Smoke test for ChapterSpec.endState (AI-authoring + DB + UI support).
-// Run: npx tsx src/verify-endstate.ts
+// Run from repo root: npm --prefix server exec -- tsx server/src/verify-endstate.ts
 //
 // Covers: applyEndStateOps, defineChapter wiring, end-to-end parity with
 // chapter3's hand-written pattern, validateChapterSpec guardrails, crash-safety
@@ -401,10 +401,15 @@ check('field not present in existingEndState map at all is clean', () => {
 console.log('\n§9 — Regression: existing smoke tests')
 
 import { execSync } from 'child_process'
+import { fileURLToPath } from 'node:url'
+import { dirname } from 'node:path'
+
+// verify-endstate.ts lives in server/src/ — smoke tests use paths relative to server/
+const serverRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 
 function runSmokeTest(label: string, file: string): void {
   try {
-    execSync(`npx tsx ${file}`, { stdio: 'pipe', encoding: 'utf-8', timeout: 30_000 })
+    execSync(`npx tsx ${file}`, { stdio: 'pipe', encoding: 'utf-8', timeout: 30_000, cwd: serverRoot })
     passed++
     console.log(`  \x1b[32m✓\x1b[0m ${label}`)
   } catch (e: any) {
