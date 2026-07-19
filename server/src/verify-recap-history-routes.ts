@@ -313,6 +313,34 @@ check('archive wins over legacy for same chapter', setupThen(async () => {
   }
 }))
 
+check('corrupt archive envelope returns 500 and never falls back to legacy history', setupThen(async () => {
+  const s = createMemoryStore()
+  const pwHash = await hashPassword('testpass-corrupt-envelope')
+  const u = await s.createUser('corrupt-envelope-user', pwHash)
+  const session = await s.createSession(u.id)
+  const wiki = makeWikiWithLegacyLog('## Chapter 1: Legacy Fallback\nThis must not be returned.')
+  wiki[ARCHIVE_FILE] = { frontmatter: { version: 99, entries: [] }, body: '' }
+  const pt = await s.create('kaspen', wiki, [], u.id)
+
+  const a = createApp(s)
+  const { server: srv, baseUrl: url } = await listen(a)
+  try {
+    const headers = { Cookie: cookieHeader(session.id, pt.id) }
+    const list = await fetchJson(`${url}/api/recaps`, { headers })
+    assert(list.status === 500, `expected list 500, got ${list.status}`)
+    assert(list.body?.error === 'Recap history data is corrupted. Please try again.', `wrong list error: ${JSON.stringify(list.body)}`)
+    assert(!Array.isArray(list.body?.recaps), 'corrupt list must not return legacy summaries')
+
+    const detail = await fetchJson(`${url}/api/recaps/1`, { headers })
+    assert(detail.status === 500, `expected detail 500, got ${detail.status}`)
+    assert(detail.body?.error === 'Recap history data is corrupted. Please try again.', `wrong detail error: ${JSON.stringify(detail.body)}`)
+    assert(detail.body?.recap === undefined, 'corrupt detail must not return legacy recap data')
+  } finally {
+    srv.close()
+  }
+}))
+
+
 // ── §6 — Missing recap ───────────────────────────────────────────────────────
 check('GET /api/recaps/99 returns 404 when no recap', setupThen(async () => {
   const { status, body } = await fetchJson(`${baseUrl}/api/recaps/99`, {

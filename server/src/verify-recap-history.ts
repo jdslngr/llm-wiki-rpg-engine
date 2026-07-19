@@ -754,6 +754,25 @@ check('frontmatter with non-array entries is corrupt', () => {
   assert(err !== null, 'non-array entries must be corrupt')
 })
 
+check('append rejects a corrupt envelope without rewriting historical raw data', () => {
+  const wiki = emptyWiki()
+  wiki[ARCHIVE_FILE] = {
+    frontmatter: { version: 99, entries: [makeEntry({ chapterNumber: 1 })] },
+    body: 'preserve this body too',
+  }
+  const before = structuredClone(wiki)
+
+  let threw = false
+  try {
+    appendArchivedRecap(wiki, makeEntry({ chapterNumber: 2 }))
+  } catch {
+    threw = true
+  }
+
+  assert(threw, 'append must throw for a corrupt envelope')
+  assert(JSON.stringify(wiki) === JSON.stringify(before), 'corrupt archive must remain unchanged')
+})
+
 // ---------------------------------------------------------------------------
 // §9 — Deep-clone isolation
 // ---------------------------------------------------------------------------

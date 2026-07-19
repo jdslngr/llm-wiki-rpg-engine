@@ -128,7 +128,9 @@ real playthrough: turn 2 read 5,210 of 5,550 input tokens from cache, turn 3 rea
   regenerated — later chapter edits can't change what already happened. Existing
   unversioned archives are read as legacy v0 and silently upgraded on the next append.
   A corrupt or unsupported version is treated as archive corruption, never mistaken
-  for an empty archive.
+  for an empty archive: new appends refuse to overwrite it, recap preparation never
+  regenerates, and history reads return a retryable error rather than legacy fallback
+  data.
 - 🏁 **Final-chapter support** — authors mark a chapter as the end of the story,
   optionally writing an Epilogue and Acknowledgment. The recap screen reflects these
   without generic "The End" copy.

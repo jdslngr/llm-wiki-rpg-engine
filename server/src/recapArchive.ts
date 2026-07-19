@@ -308,11 +308,14 @@ export function validEntries(wiki: WikiMap): ArchivedRecapEntry[] {
 
 // ── Writer ───────────────────────────────────────────────────────────────────
 
-/** Read the raw entries array for appending. Returns the array (may be empty)
- *  or null if the envelope is missing or corrupt. */
-function rawEntriesForWrite(wiki: WikiMap): unknown[] | null {
+/** Read the raw entries array for appending. A corrupt envelope must stop the
+ *  write: treating it as an empty archive would silently discard historical
+ *  raw data when the new v1 envelope is installed. */
+function rawEntriesForWrite(wiki: WikiMap): unknown[] {
   const envelope = parseArchiveEnvelope(wiki)
-  if (!envelope.ok) return null
+  if (!envelope.ok) {
+    throw new Error(`Cannot append recap to corrupt archive: ${envelope.reason}`)
+  }
   return envelope.entries
 }
 
@@ -341,7 +344,7 @@ export function appendArchivedRecap(wiki: WikiMap, entry: ArchivedRecapEntry): W
   // Deep-clone every existing raw row — no shared references between input
   // and output wiki (fixes finding #6).
   const raw = rawEntriesForWrite(wiki)
-  const existing: unknown[] = raw !== null ? structuredClone(raw) : []
+  const existing: unknown[] = structuredClone(raw)
   const clone = structuredClone(validated)
   existing.push(clone)
 

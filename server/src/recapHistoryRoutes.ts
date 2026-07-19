@@ -20,6 +20,7 @@ import {
   toSummary,
   readArchive,
   parseLegacyChapterLog,
+  archiveEnvelopeError,
   type MergedRecapEntry,
   type RecapSummary,
 } from './recapArchive.js'
@@ -59,6 +60,11 @@ export function recapHistoryRoutes(store: PlaythroughStore): Router {
         return
       }
 
+      if (archiveEnvelopeError(pt.wiki)) {
+        res.status(500).json({ error: 'Recap history data is corrupted. Please try again.' })
+        return
+      }
+
       const merged = mergeArchiveAndLegacy(pt.wiki)
       const summaries: RecapSummary[] = merged.map(toSummary).reverse() // newest first
 
@@ -87,6 +93,11 @@ export function recapHistoryRoutes(store: PlaythroughStore): Router {
       const pt = await store.get(pid)
       if (!pt || pt.userId !== req.userId) {
         res.status(404).json({ error: 'No active game.' })
+        return
+      }
+
+      if (archiveEnvelopeError(pt.wiki)) {
+        res.status(500).json({ error: 'Recap history data is corrupted. Please try again.' })
         return
       }
 

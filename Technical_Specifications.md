@@ -319,7 +319,9 @@ end-state" section for the declarative form.
   are read as legacy v0 and silently upgraded to v1 on the next successful append (invalid
   rows preserved byte-for-value). A corrupt or unsupported declared version is treated as
   archive corruption — `archiveEnvelopeError()` returns the reason; `prepareChapterRecap` fails
-  safely with `RecapCorruptionError` rather than regenerating. A legacy prose-only fallback
+  safely with `RecapCorruptionError` rather than regenerating. `appendArchivedRecap` refuses
+  to overwrite a corrupt envelope, and history routes return a controlled retryable error
+  instead of falling back to legacy data. A legacy prose-only fallback
   (`chapter-log.md`) is parsed for chapters predating the archive (only strictly increasing
   chapter numbers accepted); archive always wins for the same chapter number.
 - **Recap preparation** (`recapPreparation.ts`) — shared archive-first, cache-second,
@@ -512,9 +514,9 @@ npm --prefix server exec -- tsx server/src/<name>.ts
 | Script | Covers |
 |---|---|
 | `verify-final-chapter.ts` | `isFinal`/`epilogue`/`acknowledgment` defaults, normalization, validation, backward compat (29 tests). |
-| `verify-recap-history.ts` | Archive entry validation, facts hardening (crew/journey/notableFacts), envelope versioning (v0/v1/corrupt), legacy parsing (strictly increasing only), read/append/merge, AI-write exclusion, deep-clone isolation (79 tests). |
+| `verify-recap-history.ts` | Archive entry validation, facts hardening (crew/journey/notableFacts), envelope versioning (v0/v1/corrupt), corrupt-envelope write preservation, legacy parsing (strictly increasing only), read/append/merge, AI-write exclusion, deep-clone isolation (80 tests). |
 | `verify-recap-history-phase3.ts` | `prepareChapterRecap` archive-first logic, all-rows corruption safety, envelope corruption, lock FIFO + A/B/C timing regression, wikiStateOf exclusion (25 tests). |
-| `verify-recap-history-routes.ts` | Live Express HTTP tests for auth/ownership/parse/read-only behavior (22 tests). |
+| `verify-recap-history-routes.ts` | Live Express HTTP tests for auth/ownership/parse/read-only behavior and corrupt-envelope errors (23 tests). |
 | `verify-facts.ts` | Fact addition/eviction/guards (19 tests). |
 | `verify-facts-recap.ts` | `buildRecapFacts` notableFacts, consolidation (17 tests). |
 | `verify-endstate.ts` | `endState` ops, golden-rule, cross-chapter validation, + nested verify-facts/verify-chapter-fold smoke tests (31 tests). |
